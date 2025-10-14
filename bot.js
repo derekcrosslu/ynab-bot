@@ -1183,14 +1183,15 @@ whatsappClient.on('message', async (msg) => {
         }
 
         if (msg.body.toLowerCase() === '/debug') {
-            const history = conversations.get(msg.from) || [];
-            const txCache = transactionCache.get(msg.from);
-            const userStats = debugStats.get(msg.from);
-            const memUsage = process.memoryUsage();
+            try {
+                const history = conversations.get(msg.from) || [];
+                const txCache = transactionCache.get(msg.from);
+                const userStats = debugStats.get(msg.from);
+                const memUsage = process.memoryUsage();
 
-            console.log(`📊 Debug para ${msg.from}:`);
-            console.log(`Mensajes en historial: ${history.length}`);
-            console.log('Últimos 2 mensajes:', JSON.stringify(history.slice(-2), null, 2));
+                console.log(`📊 Debug para ${msg.from}:`);
+                console.log(`Mensajes en historial: ${history.length}`);
+                console.log('Últimos 2 mensajes:', JSON.stringify(history.slice(-2), null, 2));
 
             let debugMessage = `📊 *Debug Info*\n\n`;
 
@@ -1247,10 +1248,15 @@ whatsappClient.on('message', async (msg) => {
             debugMessage += `- RSS: ${Math.round(memUsage.rss / 1024 / 1024)}MB\n`;
             debugMessage += `- Heap: ${Math.round(memUsage.heapUsed / 1024 / 1024)}/${Math.round(memUsage.heapTotal / 1024 / 1024)}MB\n\n`;
 
-            debugMessage += `💡 Usa /reset para limpiar historial`;
+                debugMessage += `💡 Usa /reset para limpiar historial`;
 
-            await msg.reply(debugMessage);
-            return;
+                await msg.reply(debugMessage);
+                return;
+            } catch (debugError) {
+                console.error('❌ Error en /debug:', debugError);
+                await msg.reply(`❌ Error generando debug info:\n${debugError.message}\n\nDetalles: ${debugError.stack?.substring(0, 200)}`);
+                return;
+            }
         }
 
         if (msg.body.toLowerCase() === '/help') {
