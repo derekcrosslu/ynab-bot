@@ -1,0 +1,30 @@
+# Dependencias
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Variables de entorno (NUNCA subir a Git)
+.env
+
+# Sesión de WhatsApp (datos privados)
+.wwebjs_auth/
+.wwebjs_cache/
+data/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore

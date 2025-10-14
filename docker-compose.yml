@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  whatsapp-ynab-bot:
+    build: .
+    container_name: whatsapp-ynab-bot
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - YNAB_API_KEY=${YNAB_API_KEY}
+    volumes:
+      # Persistir sesión de WhatsApp entre reinicios
+      - ./data/.wwebjs_auth:/app/.wwebjs_auth
+      - ./data/.wwebjs_cache:/app/.wwebjs_cache
+    # Para sistemas Linux con problemas de permisos de Chrome
+    security_opt:
+      - seccomp:unconfined
+    # Configuración de recursos (opcional)
+    # mem_limit: 1g
+    # cpus: 1.0
