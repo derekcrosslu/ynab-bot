@@ -403,6 +403,59 @@ const tools = [
             },
             required: ["accountId", "transactions"]
         }
+    },
+    {
+        name: "cache_extracted_transactions",
+        description: "Guarda transacciones extraídas de PDF/imagen en caché temporal. IMPORTANTE: Usa esta herramienta INMEDIATAMENTE después de extraer transacciones de un PDF o imagen, ANTES de mostrarlas al usuario. Esto permite recuperarlas cuando el usuario confirme.",
+        input_schema: {
+            type: "object",
+            properties: {
+                budgetName: {
+                    type: "string",
+                    description: "Nombre del presupuesto donde se crearán: 'BCP SOLES', 'BCP DOLARES'"
+                },
+                transactions: {
+                    type: "array",
+                    description: "Array de transacciones extraídas",
+                    items: {
+                        type: "object",
+                        properties: {
+                            date: {
+                                type: "string",
+                                description: "Fecha en formato YYYY-MM-DD"
+                            },
+                            amount: {
+                                type: "number",
+                                description: "Monto (negativo para gastos, positivo para ingresos)"
+                            },
+                            payee: {
+                                type: "string",
+                                description: "Nombre del comercio/payee"
+                            },
+                            categoryName: {
+                                type: "string",
+                                description: "Nombre de la categoría (opcional)"
+                            },
+                            memo: {
+                                type: "string",
+                                description: "Nota opcional"
+                            }
+                        },
+                        required: ["date", "amount", "payee"]
+                    }
+                }
+            },
+            required: ["budgetName", "transactions"]
+        }
+    },
+    {
+        name: "get_cached_transactions",
+        description: "Recupera transacciones extraídas previamente de PDF/imagen. Usa esta herramienta cuando el usuario confirme que quiere crear las transacciones que le mostraste.",
+        input_schema: {
+            type: "object",
+            properties: {},
+            required: []
+        }
     }
 ];
 
@@ -854,6 +907,48 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                     errors: errors.length > 0 ? errors : undefined
                 };
 
+            case 'cache_extracted_transactions':
+                // Guardar transacciones en caché temporal
+                imageTransactionsCache.set(userId, {
+                    timestamp: Date.now(),
+                    budgetName: toolInput.budgetName,
+                    transactions: toolInput.transactions
+                });
+                console.log(`💾 Cached ${toolInput.transactions.length} transactions for ${userId} in budget ${toolInput.budgetName}`);
+                return {
+                    success: true,
+                    cached: toolInput.transactions.length,
+                    budgetName: toolInput.budgetName,
+                    message: `Transacciones guardadas en caché: ${toolInput.transactions.length} transacciones para ${toolInput.budgetName}`
+                };
+
+            case 'get_cached_transactions':
+                // Recuperar transacciones del caché
+                const cachedData = imageTransactionsCache.get(userId);
+                if (!cachedData) {
+                    return {
+                        error: "No hay transacciones en caché. Necesito que primero me envíes un estado de cuenta (imagen o PDF) para extraer las transacciones."
+                    };
+                }
+
+                // Validar que el caché no sea muy antiguo (30 minutos)
+                const cacheAge = Date.now() - cachedData.timestamp;
+                if (cacheAge > 30 * 60 * 1000) {
+                    imageTransactionsCache.delete(userId);
+                    return {
+                        error: "El caché de transacciones expiró (más de 30 minutos). Por favor envía el estado de cuenta de nuevo."
+                    };
+                }
+
+                console.log(`📤 Retrieved ${cachedData.transactions.length} transactions from cache for ${userId}`);
+                return {
+                    success: true,
+                    budgetName: cachedData.budgetName,
+                    transactions: cachedData.transactions,
+                    count: cachedData.transactions.length,
+                    cacheAge: Math.floor(cacheAge / 1000) // segundos
+                };
+
             default:
                 throw new Error(`Herramienta desconocida: ${toolName}`);
         }
@@ -971,6 +1066,13 @@ Información a extraer:
 - Monto y su signo correcto según la columna
 - NO extraigas: saldos, fechas de corte, totales, información de cuenta
 
+PASO 2.5 - GUARDAR EN CACHÉ (CRÍTICO):
+INMEDIATAMENTE después de extraer las transacciones del PDF/imagen:
+1. Usa cache_extracted_transactions con budgetName y el array completo de transacciones
+2. Esto es OBLIGATORIO - sin este paso, las transacciones se perderán cuando el usuario confirme
+3. El caché expira en 30 minutos
+4. NO esperes a que el usuario confirme para guardar - hazlo INMEDIATAMENTE después de extraer
+
 PASO 3 - SUGERIR CATEGORÍAS:
 - Para cada transacción, sugiere una categoría basándote SOLO en las categorías de get_ynab_categories
 - Si no hay una categoría apropiada, deja la transacción sin categoría (no inventes nombres)
@@ -983,12 +1085,15 @@ PASO 4 - PRESENTAR Y CONFIRMAR:
 4. Espera confirmación del usuario antes de crear
 
 PASO 5 - CREAR TRANSACCIONES:
-Cuando el usuario confirme, usa create_multiple_transactions con:
-- budgetName: "BCP SOLES" o "BCP DOLARES" (OBLIGATORIO)
-- accountId: el ID de la cuenta específica
-- transactions: array con TODAS las transacciones
-- Asegúrate que los montos tengan el signo correcto (negativo para CARGOS/DEBE, positivo para ABONOS/HABER)
-- Fechas en formato YYYY-MM-DD
+Cuando el usuario confirme:
+1. PRIMERO usa get_cached_transactions para recuperar las transacciones que guardaste
+2. Si el caché está vacío o expiró, pide al usuario que envíe el estado de cuenta de nuevo
+3. Si el caché es válido, usa create_multiple_transactions con:
+   - budgetName: el budgetName del caché recuperado
+   - accountId: el ID de la cuenta que el usuario especificó
+   - transactions: el array de transacciones del caché
+4. Asegúrate que los montos tengan el signo correcto (negativo para CARGOS/DEBE, positivo para ABONOS/HABER)
+5. Fechas en formato YYYY-MM-DD
 
 Ejemplo de análisis correcto:
 - Línea: "16SET 16SET EXT MDOPAGO*MPAGO*" con "1.50" en columna ABONOS/HABER
