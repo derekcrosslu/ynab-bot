@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 const fs = require('fs');
+const pdf = require('pdf-parse');
 require('dotenv').config();
 
 // Configurar Claude
@@ -33,6 +34,19 @@ function getChromePath() {
     // Si no se encuentra Chrome, dejar que Puppeteer use su Chromium por defecto
     console.log('⚠️  No se encontró Chrome, usando Chromium de Puppeteer');
     return undefined;
+}
+
+// Extraer texto de PDF
+async function extractTextFromPDF(pdfBuffer) {
+    try {
+        console.log('📄 Extrayendo texto del PDF...');
+        const data = await pdf(pdfBuffer);
+        console.log(`✅ Texto extraído: ${data.text.length} caracteres`);
+        return data.text;
+    } catch (error) {
+        console.error('Error extrayendo texto del PDF:', error);
+        throw error;
+    }
 }
 
 const whatsappClient = new Client({
@@ -821,7 +835,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
 // ===== FUNCIÓN PARA HABLAR CON CLAUDE =====
 
-async function askClaude(userMessage, conversationHistory = [], userId = 'default', imageData = null) {
+async function askClaude(userMessage, conversationHistory = [], userId = 'default', imageData = null, pdfText = null) {
     try {
         const systemPrompt = `Eres un asistente financiero personal conectado a YNAB (You Need A Budget).
 
@@ -903,14 +917,14 @@ Ejemplos:
 - "Registra $30 en Uber como transporte en BCP soles" → budgetName: "BCP SOLES", amount: -30, payee: "Uber", categoryName: "Transportation"
 - "Agrega mi salario de $2000 en BCP dólares" → budgetName: "BCP DOLARES", amount: 2000, payee: "Salario"
 
-ANÁLISIS DE ESTADOS DE CUENTA (IMÁGENES):
+ANÁLISIS DE ESTADOS DE CUENTA (IMÁGENES Y PDFs):
 PASO 1 - OBTENER CATEGORÍAS DISPONIBLES:
-- ANTES de analizar la imagen, SIEMPRE llama primero a get_ynab_categories con budgetName
+- ANTES de analizar la imagen o PDF, SIEMPRE llama primero a get_ynab_categories con budgetName
 - Esto te dará la lista EXACTA de categorías disponibles en YNAB
 - SOLO puedes sugerir categorías que aparezcan en esta lista
 - Si una categoría no existe en la respuesta, NO la sugieras
 
-PASO 2 - ANALIZAR LA IMAGEN DEL ESTADO DE CUENTA BCP:
+PASO 2 - ANALIZAR EL ESTADO DE CUENTA BCP (IMAGEN O PDF):
 Los estados de cuenta BCP tienen esta estructura:
 - Columna **CARGOS/DEBE** (izquierda) = gastos/débitos → monto NEGATIVO
 - Columna **ABONOS/HABER** (derecha) = ingresos/créditos → monto POSITIVO
@@ -953,7 +967,13 @@ Ejemplo de análisis correcto:
 - Línea: "03SET 03SET TRAN.CEL.BM" con "480.00" en columna CARGOS/DEBE
   = Transacción: fecha: 2025-09-03, payee: "TRAN.CEL.BM", amount: -480 (negativo porque está en CARGOS)
 
-Ejemplo de respuesta al recibir estado de cuenta:
+NOTA SOBRE PDFs:
+- Los PDFs se procesan extrayendo todo el texto del documento
+- El texto extraído contiene toda la información del estado de cuenta
+- Analiza el texto del mismo modo que analizarías una imagen: busca fechas, montos, payees, y determina si son cargos o abonos
+- PDFs de BCP tienen el mismo formato que las imágenes: columnas CARGOS/DEBE y ABONOS/HABER
+
+Ejemplo de respuesta al recibir estado de cuenta (imagen o PDF):
 "Encontré 3 transacciones en tu estado de cuenta:
 
 1. 15/10 - Starbucks - S/45.00 (sugiero: Eating Out)
@@ -964,7 +984,7 @@ Ejemplo de respuesta al recibir estado de cuenta:
 
 Responde de forma conversacional, amigable y en español. Sé breve en WhatsApp (máximo 2-3 párrafos).`;
 
-        // Construir el mensaje del usuario (con o sin imagen)
+        // Construir el mensaje del usuario (con o sin imagen/PDF)
         let userContent;
         if (imageData) {
             // Si hay imagen, el contenido es un array con texto e imagen
@@ -992,8 +1012,15 @@ Responde de forma conversacional, amigable y en español. Sé breve en WhatsApp 
                     text: 'Analiza esta imagen de estado de cuenta y extrae todas las transacciones que encuentres.'
                 });
             }
+        } else if (pdfText) {
+            // Si hay PDF, incluir el texto extraído
+            if (userMessage && userMessage.trim()) {
+                userContent = `${userMessage}\n\n[Contenido del PDF extraído]:\n${pdfText}`;
+            } else {
+                userContent = `Analiza este estado de cuenta en PDF y extrae todas las transacciones que encuentres.\n\n[Contenido del PDF]:\n${pdfText}`;
+            }
         } else {
-            // Sin imagen, solo texto
+            // Sin imagen ni PDF, solo texto
             userContent = userMessage;
         }
 
@@ -1139,18 +1166,22 @@ whatsappClient.on('message', async (msg) => {
 📝 "Registra un gasto de $50 en Starbucks"
 📈 "¿Cuánto gasté este mes?"
 📷 Envía una foto de tu estado de cuenta para procesarla
+📄 Envía un PDF de tu estado de cuenta para procesarlo
 🔄 /reset - Reiniciar conversación
 🐛 /debug - Ver estado del historial
 ❓ /help - Ver ayuda`);
             return;
         }
 
-        // Detectar si el mensaje tiene imagen
+        // Detectar si el mensaje tiene imagen o PDF
         let imageData = null;
+        let pdfText = null;
         if (msg.hasMedia) {
             console.log('📷 Mensaje contiene media, descargando...');
             try {
                 const media = await msg.downloadMedia();
+
+                // Procesar imágenes
                 if (media.mimetype.startsWith('image/')) {
                     imageData = {
                         mimetype: media.mimetype,
@@ -1158,9 +1189,16 @@ whatsappClient.on('message', async (msg) => {
                     };
                     console.log(`✅ Imagen descargada: ${media.mimetype}`);
                 }
+                // Procesar PDFs
+                else if (media.mimetype === 'application/pdf') {
+                    console.log('📄 PDF detectado, extrayendo texto...');
+                    const pdfBuffer = Buffer.from(media.data, 'base64');
+                    pdfText = await extractTextFromPDF(pdfBuffer);
+                    console.log(`✅ PDF procesado: ${pdfText.length} caracteres extraídos`);
+                }
             } catch (error) {
-                console.error('Error descargando media:', error);
-                await msg.reply('❌ No pude descargar la imagen. Intenta de nuevo.');
+                console.error('Error descargando/procesando media:', error);
+                await msg.reply('❌ No pude descargar o procesar el archivo. Intenta de nuevo.');
                 return;
             }
         }
@@ -1168,8 +1206,8 @@ whatsappClient.on('message', async (msg) => {
         // Obtener historial de conversación
         let history = conversations.get(msg.from) || [];
 
-        // Procesar con Claude (pasar userId para caché de transacciones y la imagen si existe)
-        const response = await askClaude(msg.body, history, msg.from, imageData);
+        // Procesar con Claude (pasar userId para caché de transacciones, la imagen o el PDF si existen)
+        const response = await askClaude(msg.body, history, msg.from, imageData, pdfText);
 
         // Guardar en historial
         history.push(
