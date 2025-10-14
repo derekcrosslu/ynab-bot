@@ -409,6 +409,28 @@ const tools = [
 // ===== FUNCIÓN PARA EJECUTAR HERRAMIENTAS =====
 
 async function executeToolCall(toolName, toolInput, userId = 'default') {
+    // Track tool call in debug stats
+    const userStats = debugStats.get(userId) || {
+        lastToolCalls: [],
+        imagesProcessed: 0,
+        pdfsProcessed: 0,
+        lastBudget: null,
+        lastAccount: null
+    };
+
+    userStats.lastToolCalls.unshift({
+        tool: toolName,
+        timestamp: new Date().toISOString(),
+        input: toolInput
+    });
+
+    // Keep only last 10 tool calls
+    if (userStats.lastToolCalls.length > 10) {
+        userStats.lastToolCalls = userStats.lastToolCalls.slice(0, 10);
+    }
+
+    debugStats.set(userId, userStats);
+
     try {
         switch(toolName) {
             case 'get_ynab_budgets':
@@ -423,6 +445,14 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'get_ynab_accounts':
                 const ynabData = await getYnabAccounts(toolInput.budgetName || null);
+
+                // Track budget context
+                const stats = debugStats.get(userId);
+                if (stats) {
+                    stats.lastBudget = ynabData.budgetName;
+                    debugStats.set(userId, stats);
+                }
+
                 return {
                     budgetId: ynabData.budgetId,
                     budgetName: ynabData.budgetName,
@@ -1122,6 +1152,9 @@ const transactionCache = new Map();
 // Caché de transacciones extraídas de imágenes (pendientes de crear en YNAB)
 const imageTransactionsCache = new Map();
 
+// Estadísticas de debug por usuario
+const debugStats = new Map();
+
 whatsappClient.on('message', async (msg) => {
     console.log('========================================');
     console.log('📨 MENSAJE RECIBIDO:');
@@ -1151,10 +1184,72 @@ whatsappClient.on('message', async (msg) => {
 
         if (msg.body.toLowerCase() === '/debug') {
             const history = conversations.get(msg.from) || [];
+            const txCache = transactionCache.get(msg.from);
+            const userStats = debugStats.get(msg.from);
+            const memUsage = process.memoryUsage();
+
             console.log(`📊 Debug para ${msg.from}:`);
             console.log(`Mensajes en historial: ${history.length}`);
             console.log('Últimos 2 mensajes:', JSON.stringify(history.slice(-2), null, 2));
-            await msg.reply(`📊 Debug:\n- Mensajes en historial: ${history.length}\n- Usa /reset para limpiar`);
+
+            let debugMessage = `📊 *Debug Info*\n\n`;
+
+            // Conversation history
+            debugMessage += `💬 *Conversación:*\n`;
+            debugMessage += `- Mensajes en historial: ${history.length}\n\n`;
+
+            // Transaction cache
+            debugMessage += `💾 *Caché de Transacciones:*\n`;
+            if (txCache) {
+                const cacheAge = Math.floor((Date.now() - txCache.timestamp) / 1000 / 60);
+                debugMessage += `- Transacciones en caché: ${Object.keys(txCache.transactions).length}\n`;
+                debugMessage += `- Edad del caché: ${cacheAge} min\n\n`;
+            } else {
+                debugMessage += `- No hay transacciones en caché\n\n`;
+            }
+
+            // PDF/Image processing stats
+            debugMessage += `📄 *Procesamiento:*\n`;
+            if (userStats) {
+                debugMessage += `- Imágenes procesadas: ${userStats.imagesProcessed}\n`;
+                debugMessage += `- PDFs procesados: ${userStats.pdfsProcessed}\n\n`;
+            } else {
+                debugMessage += `- No hay estadísticas\n\n`;
+            }
+
+            // Last tool calls
+            debugMessage += `🔧 *Últimas Herramientas:*\n`;
+            if (userStats && userStats.lastToolCalls.length > 0) {
+                userStats.lastToolCalls.slice(0, 5).forEach((call, index) => {
+                    const time = new Date(call.timestamp).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                    debugMessage += `${index + 1}. ${call.tool} (${time})\n`;
+                });
+                debugMessage += `\n`;
+            } else {
+                debugMessage += `- No hay llamadas recientes\n\n`;
+            }
+
+            // Budget/Account context
+            debugMessage += `🏦 *Contexto YNAB:*\n`;
+            if (userStats && userStats.lastBudget) {
+                debugMessage += `- Último presupuesto: ${userStats.lastBudget}\n`;
+            } else {
+                debugMessage += `- Sin contexto de presupuesto\n`;
+            }
+            if (userStats && userStats.lastAccount) {
+                debugMessage += `- Última cuenta: ${userStats.lastAccount}\n\n`;
+            } else {
+                debugMessage += `\n`;
+            }
+
+            // Memory usage
+            debugMessage += `🖥️ *Memoria (MB):*\n`;
+            debugMessage += `- RSS: ${Math.round(memUsage.rss / 1024 / 1024)}MB\n`;
+            debugMessage += `- Heap: ${Math.round(memUsage.heapUsed / 1024 / 1024)}/${Math.round(memUsage.heapTotal / 1024 / 1024)}MB\n\n`;
+
+            debugMessage += `💡 Usa /reset para limpiar historial`;
+
+            await msg.reply(debugMessage);
             return;
         }
 
@@ -1168,7 +1263,7 @@ whatsappClient.on('message', async (msg) => {
 📷 Envía una foto de tu estado de cuenta para procesarla
 📄 Envía un PDF de tu estado de cuenta para procesarlo
 🔄 /reset - Reiniciar conversación
-🐛 /debug - Ver estado del historial
+🐛 /debug - Ver información completa del sistema
 ❓ /help - Ver ayuda`);
             return;
         }
@@ -1188,6 +1283,17 @@ whatsappClient.on('message', async (msg) => {
                         data: media.data  // Ya viene en base64
                     };
                     console.log(`✅ Imagen descargada: ${media.mimetype}`);
+
+                    // Track image processing
+                    const userStats = debugStats.get(msg.from) || {
+                        lastToolCalls: [],
+                        imagesProcessed: 0,
+                        pdfsProcessed: 0,
+                        lastBudget: null,
+                        lastAccount: null
+                    };
+                    userStats.imagesProcessed++;
+                    debugStats.set(msg.from, userStats);
                 }
                 // Procesar PDFs
                 else if (media.mimetype === 'application/pdf') {
@@ -1195,6 +1301,17 @@ whatsappClient.on('message', async (msg) => {
                     const pdfBuffer = Buffer.from(media.data, 'base64');
                     pdfText = await extractTextFromPDF(pdfBuffer);
                     console.log(`✅ PDF procesado: ${pdfText.length} caracteres extraídos`);
+
+                    // Track PDF processing
+                    const userStats = debugStats.get(msg.from) || {
+                        lastToolCalls: [],
+                        imagesProcessed: 0,
+                        pdfsProcessed: 0,
+                        lastBudget: null,
+                        lastAccount: null
+                    };
+                    userStats.pdfsProcessed++;
+                    debugStats.set(msg.from, userStats);
                 }
             } catch (error) {
                 console.error('Error descargando/procesando media:', error);
