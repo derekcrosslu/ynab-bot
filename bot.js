@@ -6,6 +6,7 @@ const fs = require('fs');
 const pdf = require('pdf-parse');
 const messageQueue = require('./message-queue');
 const analytics = require('./analytics');
+const { storage, UserStorage, CacheStorage } = require('./storage');
 require('dotenv').config();
 
 // Configurar Claude
@@ -102,6 +103,7 @@ function addStatusFooter(message, userId) {
 
     let stateEmoji = '✅';
     let stateText = 'Listo para input';
+    let hint = '';
 
     if (state.state === 'processing') {
         stateEmoji = '⏳';
@@ -109,12 +111,14 @@ function addStatusFooter(message, userId) {
     } else if (state.state === 'conversation') {
         stateEmoji = '💬';
         stateText = 'En conversación';
+        hint = '\n💡 Escribe "cancelar" o /cancel para salir';
     } else if (state.state === 'waiting_document') {
         stateEmoji = '📄';
         stateText = 'Esperando documento';
+        hint = '\n💡 Escribe "cancelar" o /cancel para salir';
     }
 
-    const footer = `\n━━━━━━━━━━━━━━━━\n📍 *Status Menu:*\nNivel: ${state.level} - ${menu ? menu.title.replace(/[🏠💰📊💵🏷️📄]/g, '').trim() : 'Menu'} | Estado: ${stateEmoji} ${stateText}`;
+    const footer = `\n━━━━━━━━━━━━━━━━\n📍 *Status Menu:*\nNivel: ${state.level} - ${menu ? menu.title.replace(/[🏠💰📊💵🏷️📄]/g, '').trim() : 'Menu'} | Estado: ${stateEmoji} ${stateText}${hint}`;
 
     return message + footer;
 }
@@ -1496,7 +1500,7 @@ whatsappClient.on('ready', () => {
     console.log('💬 Ya puedes enviar mensajes');
 });
 
-// Almacenar conversaciones por usuario
+// Almacenar conversaciones por usuario (in-memory)
 const conversations = new Map();
 
 // Caché temporal de transacciones por usuario (para categorización)
@@ -1510,6 +1514,9 @@ const pdfTextCache = new Map();
 
 // Estadísticas de debug por usuario
 const debugStats = new Map();
+
+// NOTA: storage.js está disponible para migración futura
+// Para integrar: reemplazar Maps con CacheStorage.get/set
 
 whatsappClient.on('message', async (msg) => {
     // ⚡ QUEUE MESSAGE: Prevent race conditions by queuing messages per user
@@ -1542,6 +1549,17 @@ whatsappClient.on('message', async (msg) => {
         // Obtener o inicializar estado de menú
         const menuState = getUserMenuState(msg.from);
 
+        // ===== NORMALIZACIÓN DE MENSAJES =====
+        // Detectar intents de navegación en lenguaje natural
+        const normalizedBody = msg.body.toLowerCase().trim();
+        const cancelIntents = ['cancel', 'cancelar', 'salir', 'exit'];
+        const backIntents = ['back', 'volver', 'atras', 'atrás', 'regresar'];
+        const helpIntents = ['ayuda', 'help', 'info'];
+
+        const isCancelIntent = cancelIntents.some(intent => normalizedBody === intent);
+        const isBackIntent = backIntents.some(intent => normalizedBody === intent);
+        const isHelpIntent = helpIntents.some(intent => normalizedBody === intent);
+
         // Comandos especiales
         if (msg.body.toLowerCase() === '/reset') {
             conversations.delete(msg.from);
@@ -1553,17 +1571,34 @@ whatsappClient.on('message', async (msg) => {
             return;
         }
 
-        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done') {
+        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done' || msg.body.toLowerCase() === '/cancel' || isCancelIntent) {
             // Volver al menú principal
             // End current flow if in conversation
-            if (menuState.state === 'conversation') {
-                analytics.endFlow(msg.from, 'manual_exit', true);
+            if (menuState.state === 'conversation' || menuState.state === 'waiting_document') {
+                analytics.endFlow(msg.from, 'user_cancelled', true);
+                console.log(`🚫 Usuario ${msg.from} canceló flow desde estado: ${menuState.state}`);
             }
             conversations.delete(msg.from);
             initializeUserMenuState(msg.from);
             const welcomeMsg = renderMenu('main');
             await msg.reply(addStatusFooter(welcomeMsg, msg.from));
             return;
+        }
+
+        // Comando "back" - navegar con palabras clave (pero NO "0" en modo menu)
+        // En modo menu, dejamos que "0" sea manejado por la estructura de menú
+        const shouldHandleBackCommand = isBackIntent && menuState.state !== 'menu';
+
+        if (shouldHandleBackCommand) {
+            // En conversación o waiting_document, "back" funciona como cancel
+            if (menuState.state === 'conversation' || menuState.state === 'waiting_document') {
+                analytics.endFlow(msg.from, 'user_went_back', true);
+                conversations.delete(msg.from);
+                initializeUserMenuState(msg.from);
+                const welcomeMsg = renderMenu('main');
+                await msg.reply(addStatusFooter(welcomeMsg, msg.from));
+                return;
+            }
         }
 
         if (msg.body.toLowerCase() === '/debug') {
@@ -1657,7 +1692,7 @@ whatsappClient.on('message', async (msg) => {
             }
         }
 
-        if (msg.body.toLowerCase() === '/help') {
+        if (msg.body.toLowerCase() === '/help' || isHelpIntent) {
             const helpMsg = `🤖 *Ayuda - Bot YNAB*
 
 *Navegación por Menús:*
@@ -1665,9 +1700,17 @@ Usa los números (1, 2, 3, etc.) para navegar por las opciones del menú.
 
 *Comandos disponibles:*
 📱 /menu - Volver al menú principal
-🔄 /reset - Reiniciar todo
+🚫 /cancel - Cancelar operación actual
+⬅️ /back o "0" - Volver al menú anterior
+🔄 /reset - Reiniciar todo (limpia historial)
 🐛 /debug - Ver información del sistema
 ❓ /help - Ver esta ayuda
+
+*Navegación en lenguaje natural:*
+También puedes escribir:
+• "cancel", "cancelar", "salir" → Cancelar
+• "back", "volver", "atrás" → Ir atrás
+• "ayuda", "help" → Ver ayuda
 
 *Funcionalidades:*
 • Ver balances de cuentas
