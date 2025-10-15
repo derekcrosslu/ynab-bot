@@ -95,26 +95,98 @@
       "options": [
         {
           "key": "1",
-          "label": "CHASE 5061",
+          "label": "CHASE Checking 5540",
           "action": "execute_claude",
           "function": "show_account_balance",
-          "params": { "budgetName": "USA BANKS", "accountFilter": "5061" },
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5540" },
           "return_to": "select_account_usa"
         },
         {
           "key": "2",
-          "label": "CHASE 5841",
+          "label": "CHASE Savings 2111",
           "action": "execute_claude",
           "function": "show_account_balance",
-          "params": { "budgetName": "USA BANKS", "accountFilter": "5841" },
+          "params": { "budgetName": "USA BANKS", "accountFilter": "2111" },
           "return_to": "select_account_usa"
         },
         {
           "key": "3",
+          "label": "CHASE Credit Card 5861",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5861" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "4",
+          "label": "CHASE Jpm Core 5006",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5006" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "5",
+          "label": "CHASE Jpm Lms 5007",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5007" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "6",
+          "label": "CHASE Self-Directed 7301",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "7301" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "7",
+          "label": "CAPONE 360 Checking 3647",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "3647" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "8",
+          "label": "CAPONE Platinum 1479",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "1479" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "9",
+          "label": "CAPONE QuicksilverOne 6372",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "6372" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "a",
+          "label": "BOA Credit Card 6949",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "6949" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "b",
           "label": "PayPal",
           "action": "execute_claude",
           "function": "show_account_balance",
           "params": { "budgetName": "USA BANKS", "accountFilter": "PayPal" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "c",
+          "label": "PayPal Credit 3427",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "3427" },
           "return_to": "select_account_usa"
         },
         {
@@ -233,26 +305,98 @@
       "options": [
         {
           "key": "1",
-          "label": "CHASE 5061",
+          "label": "CHASE Checking 5540",
           "action": "execute_claude",
           "function": "show_transactions",
-          "params": { "budgetName": "USA BANKS", "accountFilter": "5061" },
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5540" },
           "return_to": "select_account_usa_tx"
         },
         {
           "key": "2",
-          "label": "CHASE 5841",
+          "label": "CHASE Savings 2111",
           "action": "execute_claude",
           "function": "show_transactions",
-          "params": { "budgetName": "USA BANKS", "accountFilter": "5841" },
+          "params": { "budgetName": "USA BANKS", "accountFilter": "2111" },
           "return_to": "select_account_usa_tx"
         },
         {
           "key": "3",
+          "label": "CHASE Credit Card 5861",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5861" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "4",
+          "label": "CHASE Jpm Core 5006",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5006" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "5",
+          "label": "CHASE Jpm Lms 5007",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5007" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "6",
+          "label": "CHASE Self-Directed 7301",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "7301" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "7",
+          "label": "CAPONE 360 Checking 3647",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "3647" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "8",
+          "label": "CAPONE Platinum 1479",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "1479" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "9",
+          "label": "CAPONE QuicksilverOne 6372",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "6372" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "a",
+          "label": "BOA Credit Card 6949",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "6949" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "b",
           "label": "PayPal",
           "action": "execute_claude",
           "function": "show_transactions",
           "params": { "budgetName": "USA BANKS", "accountFilter": "PayPal" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "c",
+          "label": "PayPal Credit 3427",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "3427" },
           "return_to": "select_account_usa_tx"
         },
         {

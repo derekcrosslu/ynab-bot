@@ -1293,14 +1293,26 @@ whatsappClient.on('message', async (msg) => {
             debugMessage += `💬 *Conversación:*\n`;
             debugMessage += `- Mensajes en historial: ${history.length}\n\n`;
 
-            // Transaction cache
-            debugMessage += `💾 *Caché de Transacciones:*\n`;
+            // Transaction cache (for categorization)
+            debugMessage += `💾 *Caché de Transacciones (Categorización):*\n`;
             if (txCache) {
                 const cacheAge = Math.floor((Date.now() - txCache.timestamp) / 1000 / 60);
                 debugMessage += `- Transacciones en caché: ${Object.keys(txCache.transactions).length}\n`;
                 debugMessage += `- Edad del caché: ${cacheAge} min\n\n`;
             } else {
                 debugMessage += `- No hay transacciones en caché\n\n`;
+            }
+
+            // Image/PDF transaction cache
+            const imageCache = stateManager.imageTransactionsCache.get(msg.from);
+            debugMessage += `📄 *Caché de PDF/Imágenes:*\n`;
+            if (imageCache) {
+                const imageCacheAge = Math.floor((Date.now() - imageCache.timestamp) / 1000 / 60);
+                debugMessage += `- Transacciones extraídas: ${imageCache.transactions.length}\n`;
+                debugMessage += `- Presupuesto: ${imageCache.budgetName}\n`;
+                debugMessage += `- Edad del caché: ${imageCacheAge} min\n\n`;
+            } else {
+                debugMessage += `- No hay transacciones extraídas\n\n`;
             }
 
             // PDF/Image processing stats
