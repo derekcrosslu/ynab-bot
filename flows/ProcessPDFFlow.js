@@ -1,8 +1,8 @@
 /**
- * ProcessPDFFlow - Extract and create transactions from PDF/images
+ * ProcessPDFFlow - Extract and create transactions from PDFs and Images
  *
- * Handles PDF/image upload, extraction, and transaction creation.
- * Uses DIRECT async Claude call (no tool reliance).
+ * Handles PDF and image upload, extraction, and transaction creation.
+ * Uses DIRECT async Claude call with Vision API for images (no tool reliance).
  */
 
 const BaseFlow = require('./BaseFlow');
@@ -21,6 +21,7 @@ class ProcessPDFFlow extends BaseFlow {
             step: 'start',
             data: {
                 pdfText: null,
+                imageData: null,  // For image uploads
                 budgetName: null,
                 accountId: null,
                 extractedTransactions: [],
@@ -50,15 +51,16 @@ class ProcessPDFFlow extends BaseFlow {
     }
 
     /**
-     * Start the flow with PDF text
+     * Start the flow with PDF or Image
      */
     async onStart(message) {
-        console.log(`📄 Starting ProcessPDFFlow for ${this.userId}`);
+        const docType = this.state.data.imageData ? 'imagen' : 'PDF';
+        console.log(`📄 Starting ProcessPDFFlow (${docType}) for ${this.userId}`);
 
-        // Message should contain the PDF text or be triggered after upload
+        // Message should contain the PDF text or image data
         this.state.step = 'waiting_budget';
 
-        return `📄 *Extraer Transacciones desde PDF*
+        return `📄 *Extraer Transacciones*
 
 He recibido el documento. ¿De qué presupuesto son estas transacciones?
 
@@ -74,6 +76,13 @@ Escribe el número o nombre del presupuesto.`;
      */
     setPDFText(pdfText) {
         this.state.data.pdfText = pdfText;
+    }
+
+    /**
+     * Set image data (called externally for image uploads)
+     */
+    setImageData(imageData) {
+        this.state.data.imageData = imageData;
     }
 
     /**
@@ -127,16 +136,19 @@ Escribe el número o nombre del presupuesto.`;
     }
 
     /**
-     * Extract transactions from PDF using DIRECT async Claude call
+     * Extract transactions from PDF or Image using DIRECT async Claude call
      */
     async _extractTransactions() {
-        if (!this.state.data.pdfText) {
+        const { pdfText, imageData } = this.state.data;
+
+        if (!pdfText && !imageData) {
             this.state.step = 'complete';
-            return '❌ Error: No hay texto de PDF disponible.';
+            return '❌ Error: No hay documento disponible para procesar.';
         }
 
         try {
-            console.log(`📄 Extracting transactions DIRECTLY from PDF for ${this.state.data.budgetName}`);
+            const docType = imageData ? 'Image' : 'PDF';
+            console.log(`📄 Extracting transactions DIRECTLY from ${docType} for ${this.state.data.budgetName}`);
 
             // Get categories for intelligent categorization
             const { budgetId, accounts } = await ynabService.getAccounts(this.state.data.budgetName);
@@ -145,8 +157,8 @@ Escribe el número o nombre del presupuesto.`;
 
             const categories = await ynabService.getCategories(budgetId);
 
-            // Build extraction prompt with better JSON instructions
-            const extractionPrompt = `Analiza el siguiente texto de estado de cuenta BCP y extrae TODAS las transacciones.
+            // Build extraction prompt (same for both PDF and Image)
+            const extractionInstructions = `Analiza este estado de cuenta BCP y extrae TODAS las transacciones.
 
 REGLAS CRÍTICAS PARA JSON:
 1. Responde ÚNICAMENTE con JSON válido
@@ -176,10 +188,33 @@ FORMATO DE RESPUESTA (SOLO JSON, sin texto adicional):
       "memo": ""
     }
   ]
-}
+}`;
+
+            // Build message content (text or image)
+            let messageContent;
+            if (imageData) {
+                // For images, use vision API
+                messageContent = [
+                    {
+                        type: 'image',
+                        source: {
+                            type: 'base64',
+                            media_type: imageData.mimetype,
+                            data: imageData.data
+                        }
+                    },
+                    {
+                        type: 'text',
+                        text: extractionInstructions
+                    }
+                ];
+            } else {
+                // For PDFs, include the text
+                messageContent = `${extractionInstructions}
 
 TEXTO DEL PDF:
-${this.state.data.pdfText.substring(0, 8000)}`;
+${pdfText.substring(0, 8000)}`;
+            }
 
             // Call Claude DIRECTLY (not via tool)
             const client = this.anthropicClient || anthropicClient;
@@ -189,8 +224,8 @@ ${this.state.data.pdfText.substring(0, 8000)}`;
 
             const response = await client.messages.create({
                 model: 'claude-sonnet-4-20250514',
-                max_tokens: 8192,  // Increased for large PDFs
-                messages: [{ role: 'user', content: extractionPrompt }]
+                max_tokens: 8192,  // Increased for large documents
+                messages: [{ role: 'user', content: messageContent }]
             });
 
             const responseText = response.content.find(c => c.type === 'text')?.text || '{}';
@@ -443,11 +478,11 @@ ${this.state.data.pdfText.substring(0, 8000)}`;
      * Get help for this flow
      */
     getHelp() {
-        return `💡 *Ayuda - Procesar PDF*
+        return `💡 *Ayuda - Procesar Documentos*
 
-Este flujo extrae transacciones de estados de cuenta en PDF.
+Este flujo extrae transacciones de estados de cuenta (PDF o imagen).
 
-1. Envía el PDF
+1. Envía el PDF o imagen
 2. Selecciona el presupuesto
 3. Revisa las transacciones extraídas
 4. Selecciona la cuenta

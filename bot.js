@@ -1636,7 +1636,8 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                 hasDocument: msg.hasMedia,
                 isPDF: pdfText !== null,
                 isImage: imageData !== null,
-                pdfText: pdfText
+                pdfText: pdfText,
+                imageData: imageData  // Pass actual image data for ProcessPDFFlow
             }
         );
 

@@ -130,9 +130,10 @@ async function ruleBasedMatching(userId, messageText, options) {
         }
     }
 
-    // Check for document upload
+    // Check for document upload (PDF or Image)
     if (options.hasDocument || options.isPDF || options.isImage) {
-        console.log(`✅ Matched flow: ProcessPDFFlow (document upload)`);
+        const docType = options.isPDF ? 'PDF' : options.isImage ? 'Image' : 'Document';
+        console.log(`✅ Matched flow: ProcessPDFFlow (${docType} upload)`);
 
         const flowInstance = new ProcessPDFFlow(userId, {
             anthropicClient: anthropicClient
@@ -141,6 +142,11 @@ async function ruleBasedMatching(userId, messageText, options) {
         // Set PDF text if provided
         if (options.pdfText) {
             flowInstance.setPDFText(options.pdfText);
+        }
+
+        // Set image data if provided
+        if (options.imageData) {
+            flowInstance.setImageData(options.imageData);
         }
 
         flowState.startFlowForUser(userId, flowInstance);
