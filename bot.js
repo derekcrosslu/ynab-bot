@@ -49,6 +49,7 @@ async function extractTextFromPDF(pdfBuffer) {
     }
 }
 
+
 // ===== SISTEMA DE MENÚS ESTRUCTURADOS =====
 
 // Cargar estructura de menús
@@ -1192,14 +1193,40 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 };
 
             case 'extract_transactions_from_pdf_text':
-                // Esta herramienta es una señal para Claude de que debe analizar el TEXTO del PDF
-                // El texto ya está en el contexto de la conversación
-                console.log(`📄 Señal para Claude: extraer transacciones de TEXTO PDF para ${toolInput.budgetName}`);
+                // Recuperar texto del PDF del caché
+                const pdfCachedData = pdfTextCache.get(userId);
+                if (!pdfCachedData) {
+                    return {
+                        error: "No hay texto de PDF en caché. Por favor envía el PDF de nuevo."
+                    };
+                }
+
+                // Validar que el caché no sea muy antiguo (5 minutos)
+                const pdfCacheAge = Date.now() - pdfCachedData.timestamp;
+                if (pdfCacheAge > 5 * 60 * 1000) {
+                    pdfTextCache.delete(userId);
+                    return {
+                        error: "El caché del PDF expiró. Por favor envía el PDF de nuevo."
+                    };
+                }
+
+                console.log(`📄 Retornando texto de PDF para que Claude lo procese (${toolInput.budgetName})`);
+
+                // Retornar el TEXTO del PDF para que Claude lo analice
                 return {
                     success: true,
-                    message: "Por favor analiza el TEXTO del PDF de estado de cuenta que se proporcionó en el mensaje del usuario. Extrae todas las transacciones identificando las columnas CARGOS/DEBE (montos negativos) y ABONOS/HABER (montos positivos). Convierte las fechas de formato DDMMM a YYYY-MM-DD (ejemplo: 03ABR → 2025-04-03). Una vez extraídas, DEBES llamar inmediatamente a cache_extracted_transactions antes de mostrarlas al usuario.",
                     budgetName: toolInput.budgetName,
-                    sourceType: "pdf_text"
+                    pdfText: pdfCachedData.text,
+                    textLength: pdfCachedData.text.length,
+                    instruction: `Analiza el siguiente texto extraído del PDF de estado de cuenta BCP. Extrae TODAS las transacciones identificando:
+- Columna CARGOS/DEBE: montos NEGATIVOS
+- Columna ABONOS/HABER: montos POSITIVOS
+- Fechas en formato DDMMM (ejemplo: 03ABR, 29ABR)
+- Convierte fechas a YYYY-MM-DD
+- Extrae el payee/descripción
+
+Después de extraer las transacciones, DEBES llamar INMEDIATAMENTE a cache_extracted_transactions con el array de transacciones ANTES de mostrarlas al usuario.`,
+                    pdfTextPreview: pdfCachedData.text.substring(0, 500) + '...'
                 };
 
             default:
@@ -1313,11 +1340,13 @@ Si el usuario envió una IMAGEN:
 Si el usuario envió un PDF (verás "[Contenido del PDF extraído]:" en el mensaje):
 1. ✅ Llama a get_ynab_categories con budgetName (BCP SOLES o BCP DOLARES)
 2. ✅ Llama a extract_transactions_from_pdf_text con budgetName
-3. ✅ La herramienta te dirá que analices el texto - HAZLO en tu siguiente respuesta
-4. ✅ Extrae transacciones del TEXTO identificando CARGOS/DEBE (negativos) y ABONOS/HABER (positivos)
-5. ✅ Convierte fechas DDMMM → YYYY-MM-DD (ej: 03ABR → 2025-04-03)
-6. ✅ INMEDIATAMENTE llama a cache_extracted_transactions con las transacciones
-7. ✅ Muestra lista al usuario y pregunta cuenta
+3. ✅ La herramienta te retornará el TEXTO del PDF en el campo "pdfText"
+4. ✅ ANALIZA el pdfText y extrae todas las transacciones:
+   - Identifica columnas CARGOS/DEBE (negativos) y ABONOS/HABER (positivos)
+   - Convierte fechas DDMMM a YYYY-MM-DD (ej: 03ABR → 2025-04-03, 29ABR → 2025-04-29)
+   - Extrae payee/descripción
+5. ✅ INMEDIATAMENTE llama a cache_extracted_transactions con las transacciones extraídas
+6. ✅ LUEGO muestra la lista al usuario con categorías sugeridas y pregunta cuenta
 
 ⚠️ **REGLAS CRÍTICAS:**
 - NUNCA confundas los flujos - usa la herramienta correcta según el tipo
@@ -1470,6 +1499,9 @@ const transactionCache = new Map();
 
 // Caché de transacciones extraídas de imágenes (pendientes de crear en YNAB)
 const imageTransactionsCache = new Map();
+
+// Caché temporal de texto extraído de PDFs (para procesamiento)
+const pdfTextCache = new Map();
 
 // Estadísticas de debug por usuario
 const debugStats = new Map();
@@ -1649,6 +1681,13 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                     const pdfBuffer = Buffer.from(media.data, 'base64');
                     pdfText = await extractTextFromPDF(pdfBuffer);
                     console.log(`✅ PDF procesado: ${pdfText.length} caracteres extraídos`);
+
+                    // Guardar texto del PDF en caché para que las herramientas puedan accederlo
+                    pdfTextCache.set(msg.from, {
+                        timestamp: Date.now(),
+                        text: pdfText
+                    });
+                    console.log(`💾 PDF text guardado en caché para ${msg.from}`);
 
                     // Track PDF processing
                     const userStats = debugStats.get(msg.from) || {
