@@ -79,11 +79,69 @@ async function executeClaudeAccountBalance(params, userId) {
     return await askClaude(prompt, [], userId, null, null);
 }
 
-// Mostrar transacciones recientes
+// Mostrar transacciones recientes - DIRECT IMPLEMENTATION (no Claude)
 async function executeClaudeTransactions(params, userId) {
-    const accountFilter = params.accountFilter ? ` que contenga "${params.accountFilter}"` : '';
-    const prompt = `Muestra las últimas 10 transacciones de la cuenta${accountFilter} del presupuesto "${params.budgetName}". Usa get_ynab_accounts primero para obtener el accountId, luego get_ynab_transactions. Muestra: fecha, payee, monto, categoría. Sé breve.`;
-    return await askClaude(prompt, [], userId, null, null);
+    try {
+        console.log(`📊 Mostrando transacciones DIRECTO para ${params.budgetName} - ${params.accountFilter}`);
+
+        // Get accounts
+        const { budgetId, accounts } = await ynabService.getAccounts(params.budgetName);
+
+        // Find account by filter
+        let account = null;
+        if (params.accountFilter) {
+            account = accounts.find(acc => acc.name.includes(params.accountFilter));
+            if (!account) {
+                return `❌ No se encontró cuenta con "${params.accountFilter}" en ${params.budgetName}`;
+            }
+        }
+
+        // Get transactions
+        const transactions = await ynabService.getTransactions(
+            budgetId,
+            account ? account.id : null,
+            90 // last 90 days
+        );
+
+        if (transactions.length === 0) {
+            return `📊 No hay transacciones recientes en ${account ? account.name : 'este presupuesto'}.`;
+        }
+
+        // Sort by date descending and take last 10
+        const recentTransactions = transactions
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 10);
+
+        // Format output
+        let message = `📊 *Últimas ${recentTransactions.length} Transacciones*\n`;
+        if (account) {
+            message += `*Cuenta:* ${account.name}\n`;
+        }
+        message += `*Presupuesto:* ${params.budgetName}\n\n`;
+
+        recentTransactions.forEach((tx, index) => {
+            const amount = (tx.amount / 1000).toFixed(2);
+            const amountStr = tx.amount < 0 ? `-$${Math.abs(amount)}` : `+$${amount}`;
+            const category = tx.category_name || 'Sin categoría';
+            const status = tx.approved ? '✅' : '⏳';
+
+            message += `${index + 1}. *${tx.date}*\n`;
+            message += `   ${tx.payee_name || 'N/A'} | ${amountStr}\n`;
+            message += `   📁 ${category} ${status}\n`;
+            if (tx.memo) {
+                message += `   💭 ${tx.memo}\n`;
+            }
+            message += `\n`;
+        });
+
+        message += `💡 Total: ${transactions.length} transacciones en últimos 90 días`;
+
+        return message;
+
+    } catch (error) {
+        console.error('Error mostrando transacciones:', error);
+        return `❌ Error obteniendo transacciones: ${error.message}`;
+    }
 }
 
 // Crear transacción manual (modo conversacional)
@@ -279,7 +337,7 @@ const tools = [
     },
     {
         name: "cache_extracted_transactions",
-        description: "🚨 CRÍTICO: Guarda transacciones extraídas de PDF/imagen en caché temporal. ⚠️ OBLIGATORIO: DEBES usar esta herramienta INMEDIATAMENTE después de extraer transacciones de un PDF o imagen, ANTES de mostrarlas al usuario. Sin este paso, las transacciones se perderán y no se podrán crear. El flujo correcto es: 1) Extraer transacciones, 2) Llamar cache_extracted_transactions, 3) Mostrar al usuario, 4) Esperar confirmación, 5) Usar get_cached_transactions, 6) Crear con create_multiple_transactions.",
+        description: "🚨🚨🚨 CRÍTICO - ACCIÓN OBLIGATORIA - NO ES OPCIONAL 🚨🚨🚨\n\nGuarda transacciones extraídas de PDF/imagen en caché temporal.\n\n⛔ REGLA ABSOLUTA: DEBES ejecutar esta herramienta INMEDIATAMENTE después de extraer transacciones, ANTES de escribir cualquier texto al usuario.\n\n❌ NO HAGAS: 'Ahora voy a cachear...', 'Voy a guardar...', 'Déjame guardar...'\n✅ SÍ HACES: Llama cache_extracted_transactions INMEDIATAMENTE, luego muestra las transacciones.\n\n⚠️ Sin este paso las transacciones SE PERDERÁN para siempre.\n\nFlujo OBLIGATORIO:\n1) Extraer transacciones del PDF/imagen\n2) ➡️ LLAMAR cache_extracted_transactions (AHORA, NO DESPUÉS)\n3) SOLO ENTONCES mostrar lista al usuario\n4) Esperar confirmación\n5) get_cached_transactions\n6) create_multiple_transactions",
         input_schema: {
             type: "object",
             properties: {
@@ -859,12 +917,29 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 console.log(`📸 Señal para Claude: extraer transacciones de IMAGEN para ${toolInput.budgetName}`);
                 return {
                     success: true,
-                    message: "Por favor analiza la IMAGEN de estado de cuenta que el usuario envió. Extrae todas las transacciones de las columnas CARGOS/DEBE (negativos) y ABONOS/HABER (positivos). Convierte las fechas de formato DDMMM a YYYY-MM-DD. Una vez extraídas, DEBES llamar inmediatamente a cache_extracted_transactions antes de mostrarlas al usuario.",
+                    instruction: `🚨 INSTRUCCIONES CRÍTICAS 🚨
+
+1) Analiza la IMAGEN de estado de cuenta que el usuario envió
+2) Extrae TODAS las transacciones:
+   - Columna CARGOS/DEBE: montos NEGATIVOS
+   - Columna ABONOS/HABER: montos POSITIVOS
+   - Fechas DDMMM → Convierte a YYYY-MM-DD
+
+3) ⚠️ ⚠️ ⚠️ ACCIÓN OBLIGATORIA INMEDIATA ⚠️ ⚠️ ⚠️
+   LLAMA cache_extracted_transactions AHORA (no digas "voy a", "ahora voy a" - HAZLO)
+   ➡️ Ejecuta la herramienta ANTES de escribir cualquier texto de respuesta
+
+4) SOLO DESPUÉS de ejecutar cache_extracted_transactions, muestra la lista al usuario
+
+SIN EL PASO 3 LAS TRANSACCIONES SE PERDERÁN.`,
                     budgetName: toolInput.budgetName,
                     sourceType: "image"
                 };
 
             case 'extract_transactions_from_pdf_text':
+                // ⚠️ DIRECT ASYNC EXTRACTION - NO RELYING ON CLAUDE TOOL CALLS
+                console.log(`📄 Extracción DIRECTA de PDF para ${toolInput.budgetName}`);
+
                 // Recuperar texto del PDF del caché
                 const pdfCachedData = stateManager.pdfTextCache.get(userId);
                 if (!pdfCachedData) {
@@ -882,24 +957,83 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                     };
                 }
 
-                console.log(`📄 Retornando texto de PDF para que Claude lo procese (${toolInput.budgetName})`);
+                try {
+                    // Get categories first for intelligent categorization
+                    const catYnabData = await ynabService.getAccounts(toolInput.budgetName);
+                    const categories = await ynabService.getCategories(catYnabData.budgetId);
 
-                // Retornar el TEXTO del PDF para que Claude lo analice
-                return {
-                    success: true,
-                    budgetName: toolInput.budgetName,
-                    pdfText: pdfCachedData.text,
-                    textLength: pdfCachedData.text.length,
-                    instruction: `Analiza el siguiente texto extraído del PDF de estado de cuenta BCP. Extrae TODAS las transacciones identificando:
-- Columna CARGOS/DEBE: montos NEGATIVOS
-- Columna ABONOS/HABER: montos POSITIVOS
-- Fechas en formato DDMMM (ejemplo: 03ABR, 29ABR)
-- Convierte fechas a YYYY-MM-DD
-- Extrae el payee/descripción
+                    // Call Claude DIRECTLY to extract transactions
+                    const extractionPrompt = `Analiza el siguiente texto de estado de cuenta BCP y extrae TODAS las transacciones.
 
-Después de extraer las transacciones, DEBES llamar INMEDIATAMENTE a cache_extracted_transactions con el array de transacciones ANTES de mostrarlas al usuario.`,
-                    pdfTextPreview: pdfCachedData.text.substring(0, 500) + '...'
-                };
+IMPORTANTE:
+- Columna CARGOS/DEBE: montos NEGATIVOS (ej: -480.00)
+- Columna ABONOS/HABER: montos POSITIVOS (ej: +1.50)
+- Fechas DDMMM: Convierte a YYYY-MM-DD (ej: 03ABR → 2025-04-03, 29ABR → 2025-04-29)
+- Extrae payee/descripción completa
+
+Categorías disponibles: ${categories.map(c => c.name).join(', ')}
+
+Responde SOLO con un JSON válido (sin markdown, sin explicaciones):
+{
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD",
+      "amount": -480.00,
+      "payee": "Nombre del comercio",
+      "categoryName": "Categoría sugerida",
+      "memo": ""
+    }
+  ]
+}
+
+TEXTO DEL PDF:
+${pdfCachedData.text}`;
+
+                    const response = await anthropic.messages.create({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 4096,
+                        messages: [{
+                            role: 'user',
+                            content: extractionPrompt
+                        }]
+                    });
+
+                    const responseText = response.content.find(c => c.type === 'text')?.text || '{}';
+
+                    // Parse JSON response (handle markdown code blocks)
+                    let jsonText = responseText.trim();
+                    if (jsonText.startsWith('```')) {
+                        jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                    }
+
+                    const extracted = JSON.parse(jsonText);
+                    const transactions = extracted.transactions || [];
+
+                    console.log(`✅ Extraídas ${transactions.length} transacciones del PDF`);
+
+                    // AUTO-CACHE the transactions
+                    stateManager.imageTransactionsCache.set(userId, {
+                        timestamp: Date.now(),
+                        budgetName: toolInput.budgetName,
+                        transactions: transactions
+                    });
+                    console.log(`💾 AUTO-CACHED ${transactions.length} transactions for ${userId}`);
+
+                    // Return formatted list
+                    return {
+                        success: true,
+                        budgetName: toolInput.budgetName,
+                        count: transactions.length,
+                        transactions: transactions,
+                        message: `✅ Extraídas y cacheadas ${transactions.length} transacciones automáticamente`
+                    };
+
+                } catch (error) {
+                    console.error('❌ Error en extracción directa de PDF:', error);
+                    return {
+                        error: `Error extrayendo transacciones: ${error.message}`
+                    };
+                }
 
             default:
                 throw new Error(`Herramienta desconocida: ${toolName}`);
@@ -1005,8 +1139,8 @@ Si el usuario envió una IMAGEN:
 3. ✅ La herramienta te dirá que analices la imagen - HAZLO en tu siguiente respuesta
 4. ✅ Extrae transacciones de CARGOS/DEBE (negativos) y ABONOS/HABER (positivos)
 5. ✅ Convierte fechas DDMMM → YYYY-MM-DD
-6. ✅ INMEDIATAMENTE llama a cache_extracted_transactions con las transacciones
-7. ✅ Muestra lista al usuario y pregunta cuenta
+6. 🚨🚨🚨 INMEDIATAMENTE llama a cache_extracted_transactions (NO escribas texto antes, EJECUTA la tool)
+7. ✅ SOLO DESPUÉS muestra lista al usuario y pregunta cuenta
 
 📄 **FLUJO 2: PDF (TEXTO)**
 Si el usuario envió un PDF (verás "[Contenido del PDF extraído]:" en el mensaje):
@@ -1017,8 +1151,8 @@ Si el usuario envió un PDF (verás "[Contenido del PDF extraído]:" en el mensa
    - Identifica columnas CARGOS/DEBE (negativos) y ABONOS/HABER (positivos)
    - Convierte fechas DDMMM a YYYY-MM-DD (ej: 03ABR → 2025-04-03, 29ABR → 2025-04-29)
    - Extrae payee/descripción
-5. ✅ INMEDIATAMENTE llama a cache_extracted_transactions con las transacciones extraídas
-6. ✅ LUEGO muestra la lista al usuario con categorías sugeridas y pregunta cuenta
+5. 🚨🚨🚨 INMEDIATAMENTE llama a cache_extracted_transactions (NO escribas texto antes, EJECUTA la tool)
+6. ✅ SOLO DESPUÉS muestra la lista al usuario con categorías sugeridas y pregunta cuenta
 
 ⚠️ **REGLAS CRÍTICAS:**
 - NUNCA confundas los flujos - usa la herramienta correcta según el tipo

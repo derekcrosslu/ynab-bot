@@ -222,7 +222,10 @@ class StateManager {
         const option = menu.options.find(opt => opt.key === selection.trim());
 
         if (!option) {
-            return { response: '❌ Opción inválida. Por favor elige una opción del menú.', stayInMenu: true };
+            // Build helpful error message with available options
+            const availableKeys = menu.options.map(opt => opt.key).join(', ');
+            const errorMsg = `❌ Opción inválida: "${selection}"\n\n💡 Opciones disponibles: ${availableKeys}\n\nPor favor elige un número del menú.`;
+            return { response: errorMsg, stayInMenu: true };
         }
 
         // Process action
