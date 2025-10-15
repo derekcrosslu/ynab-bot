@@ -659,6 +659,34 @@ const tools = [
             properties: {},
             required: []
         }
+    },
+    {
+        name: "extract_transactions_from_image",
+        description: "Extrae transacciones de una IMAGEN de estado de cuenta BCP. Usa esta herramienta cuando el usuario envíe una IMAGEN (no PDF). La imagen ya está cargada en el contexto de la conversación. Esta herramienta analiza la imagen, extrae las transacciones, las categoriza, las cachea automáticamente y retorna la lista para mostrar al usuario.",
+        input_schema: {
+            type: "object",
+            properties: {
+                budgetName: {
+                    type: "string",
+                    description: "Nombre del presupuesto: 'BCP SOLES' o 'BCP DOLARES'"
+                }
+            },
+            required: ["budgetName"]
+        }
+    },
+    {
+        name: "extract_transactions_from_pdf_text",
+        description: "Extrae transacciones de TEXTO ya extraído de un PDF de estado de cuenta BCP. Usa esta herramienta cuando el usuario envíe un PDF (no imagen). El texto del PDF ya fue extraído y está disponible en el contexto. Esta herramienta analiza el texto, extrae las transacciones (CARGOS/DEBE como negativos, ABONOS/HABER como positivos), las categoriza, las cachea automáticamente y retorna la lista para mostrar al usuario.",
+        input_schema: {
+            type: "object",
+            properties: {
+                budgetName: {
+                    type: "string",
+                    description: "Nombre del presupuesto: 'BCP SOLES' o 'BCP DOLARES'"
+                }
+            },
+            required: ["budgetName"]
+        }
     }
 ];
 
@@ -1152,6 +1180,28 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                     cacheAge: Math.floor(cacheAge / 1000) // segundos
                 };
 
+            case 'extract_transactions_from_image':
+                // Esta herramienta es una señal para Claude de que debe analizar la IMAGEN
+                // La imagen ya está en el contexto de la conversación
+                console.log(`📸 Señal para Claude: extraer transacciones de IMAGEN para ${toolInput.budgetName}`);
+                return {
+                    success: true,
+                    message: "Por favor analiza la IMAGEN de estado de cuenta que el usuario envió. Extrae todas las transacciones de las columnas CARGOS/DEBE (negativos) y ABONOS/HABER (positivos). Convierte las fechas de formato DDMMM a YYYY-MM-DD. Una vez extraídas, DEBES llamar inmediatamente a cache_extracted_transactions antes de mostrarlas al usuario.",
+                    budgetName: toolInput.budgetName,
+                    sourceType: "image"
+                };
+
+            case 'extract_transactions_from_pdf_text':
+                // Esta herramienta es una señal para Claude de que debe analizar el TEXTO del PDF
+                // El texto ya está en el contexto de la conversación
+                console.log(`📄 Señal para Claude: extraer transacciones de TEXTO PDF para ${toolInput.budgetName}`);
+                return {
+                    success: true,
+                    message: "Por favor analiza el TEXTO del PDF de estado de cuenta que se proporcionó en el mensaje del usuario. Extrae todas las transacciones identificando las columnas CARGOS/DEBE (montos negativos) y ABONOS/HABER (montos positivos). Convierte las fechas de formato DDMMM a YYYY-MM-DD (ejemplo: 03ABR → 2025-04-03). Una vez extraídas, DEBES llamar inmediatamente a cache_extracted_transactions antes de mostrarlas al usuario.",
+                    budgetName: toolInput.budgetName,
+                    sourceType: "pdf_text"
+                };
+
             default:
                 throw new Error(`Herramienta desconocida: ${toolName}`);
         }
@@ -1247,98 +1297,39 @@ Ejemplos:
 
 ANÁLISIS DE ESTADOS DE CUENTA (IMÁGENES Y PDFs):
 
-⚠️ ⚠️ ⚠️ **WORKFLOW OBLIGATORIO - SIGUE ESTOS PASOS EN ORDEN** ⚠️ ⚠️ ⚠️
+🚨 **HAY DOS FLUJOS SEPARADOS - USA LA HERRAMIENTA CORRECTA** 🚨
 
-🚨 **MUY IMPORTANTE: DEBES LLAMAR cache_extracted_transactions INMEDIATAMENTE DESPUÉS DE EXTRAER LAS TRANSACCIONES** 🚨
+📸 **FLUJO 1: IMAGEN**
+Si el usuario envió una IMAGEN:
+1. ✅ Llama a get_ynab_categories con budgetName (BCP SOLES o BCP DOLARES)
+2. ✅ Llama a extract_transactions_from_image con budgetName
+3. ✅ La herramienta te dirá que analices la imagen - HAZLO en tu siguiente respuesta
+4. ✅ Extrae transacciones de CARGOS/DEBE (negativos) y ABONOS/HABER (positivos)
+5. ✅ Convierte fechas DDMMM → YYYY-MM-DD
+6. ✅ INMEDIATAMENTE llama a cache_extracted_transactions con las transacciones
+7. ✅ Muestra lista al usuario y pregunta cuenta
 
-PASO 1 - OBTENER CATEGORÍAS:
-- Llama a get_ynab_categories con el budgetName que el usuario mencionó (BCP SOLES o BCP DOLARES)
-- Esto te dará las categorías exactas para sugerir
+📄 **FLUJO 2: PDF (TEXTO)**
+Si el usuario envió un PDF (verás "[Contenido del PDF extraído]:" en el mensaje):
+1. ✅ Llama a get_ynab_categories con budgetName (BCP SOLES o BCP DOLARES)
+2. ✅ Llama a extract_transactions_from_pdf_text con budgetName
+3. ✅ La herramienta te dirá que analices el texto - HAZLO en tu siguiente respuesta
+4. ✅ Extrae transacciones del TEXTO identificando CARGOS/DEBE (negativos) y ABONOS/HABER (positivos)
+5. ✅ Convierte fechas DDMMM → YYYY-MM-DD (ej: 03ABR → 2025-04-03)
+6. ✅ INMEDIATAMENTE llama a cache_extracted_transactions con las transacciones
+7. ✅ Muestra lista al usuario y pregunta cuenta
 
-PASO 2 - EXTRAER Y ANALIZAR LAS TRANSACCIONES:
-Los estados de cuenta BCP tienen esta estructura:
-- Columna **CARGOS/DEBE** (izquierda) = gastos/débitos → monto NEGATIVO
-- Columna **ABONOS/HABER** (derecha) = ingresos/créditos → monto POSITIVO
-- Fechas en formato: DDMMM (ej: 03SET = 3 de septiembre, 16SET = 16 de septiembre)
+⚠️ **REGLAS CRÍTICAS:**
+- NUNCA confundas los flujos - usa la herramienta correcta según el tipo
+- SIEMPRE llama a cache_extracted_transactions ANTES de mostrar al usuario
+- Sin cache, las transacciones se perderán cuando el usuario confirme
+- CARGOS/DEBE = montos NEGATIVOS (-480)
+- ABONOS/HABER = montos POSITIVOS (+1.50)
 
-IMPORTANTE - Leer columnas correctamente:
-* Si el monto aparece en la columna CARGOS/DEBE → es un gasto → usar monto NEGATIVO (-480)
-* Si el monto aparece en la columna ABONOS/HABER → es un ingreso → usar monto POSITIVO (+1.50)
-* NUNCA confundas las columnas - verifica cuidadosamente en qué columna está cada monto
-
-Información a extraer:
-- Fecha de la transacción (convertir de DDMMM a YYYY-MM-DD)
-- Nombre del comercio/payee (TRAN.CEL.BM, FINANCIERA OH, etc.)
-- Monto y su signo correcto según la columna
-- NO extraigas: saldos, fechas de corte, totales, información de cuenta
-
-🚨🚨🚨 PASO 2.5 - GUARDAR EN CACHÉ (CRÍTICO Y OBLIGATORIO) 🚨🚨🚨
-
-⛔ **ESTE PASO ES ABSOLUTAMENTE OBLIGATORIO - NO LO OMITAS NUNCA** ⛔
-
-INMEDIATAMENTE después de extraer las transacciones del PDF/imagen, DEBES:
-
-1. ✅ Llamar cache_extracted_transactions({
-     budgetName: "BCP SOLES" o "BCP DOLARES",
-     transactions: [array completo de transacciones que extrajiste]
-   })
-
-2. ⚠️ SIN ESTE PASO, LAS TRANSACCIONES SE PERDERÁN cuando el usuario confirme
-3. ⚠️ El caché expira en 30 minutos
-4. ⚠️ NO esperes a que el usuario confirme - GUARDA INMEDIATAMENTE después de extraer
-5. ⚠️ NO muestres las transacciones al usuario SIN ANTES guardarlas en caché
-
-ORDEN CORRECTO:
-- Extraer transacciones del PDF/imagen ✅
-- Llamar cache_extracted_transactions ✅ ← ESTE PASO ES OBLIGATORIO
-- Mostrar transacciones al usuario ✅
-- Esperar confirmación del usuario ✅
-- Llamar get_cached_transactions ✅
-- Crear transacciones con create_multiple_transactions ✅
-
-PASO 3 - SUGERIR CATEGORÍAS:
-- Para cada transacción, sugiere una categoría basándote SOLO en las categorías de get_ynab_categories
-- Si no hay una categoría apropiada, deja la transacción sin categoría (no inventes nombres)
-- Usa el nombre EXACTO como aparece en get_ynab_categories
-
-PASO 4 - PRESENTAR Y CONFIRMAR:
-1. Lista TODAS las transacciones con índices (1, 2, 3, etc.)
-2. Muestra: "índice. fecha - payee - monto (sugerencia: categoría o sin categoría)"
-3. Pregunta en qué cuenta BCP quiere registrarlas (Soles o Dólares)
-4. Espera confirmación del usuario antes de crear
-
-PASO 5 - CREAR TRANSACCIONES:
-Cuando el usuario confirme:
-1. PRIMERO usa get_cached_transactions para recuperar las transacciones que guardaste
-2. Si el caché está vacío o expiró, pide al usuario que envíe el estado de cuenta de nuevo
-3. Si el caché es válido, usa create_multiple_transactions con:
-   - budgetName: el budgetName del caché recuperado
-   - accountId: el ID de la cuenta que el usuario especificó
-   - transactions: el array de transacciones del caché
-4. Asegúrate que los montos tengan el signo correcto (negativo para CARGOS/DEBE, positivo para ABONOS/HABER)
-5. Fechas en formato YYYY-MM-DD
-
-Ejemplo de análisis correcto:
-- Línea: "16SET 16SET EXT MDOPAGO*MPAGO*" con "1.50" en columna ABONOS/HABER
-  = Transacción: fecha: 2025-09-16, payee: "EXT MDOPAGO*MPAGO*", amount: +1.50 (positivo porque está en ABONOS)
-
-- Línea: "03SET 03SET TRAN.CEL.BM" con "480.00" en columna CARGOS/DEBE
-  = Transacción: fecha: 2025-09-03, payee: "TRAN.CEL.BM", amount: -480 (negativo porque está en CARGOS)
-
-NOTA SOBRE PDFs:
-- Los PDFs se procesan extrayendo todo el texto del documento
-- El texto extraído contiene toda la información del estado de cuenta
-- Analiza el texto del mismo modo que analizarías una imagen: busca fechas, montos, payees, y determina si son cargos o abonos
-- PDFs de BCP tienen el mismo formato que las imágenes: columnas CARGOS/DEBE y ABONOS/HABER
-
-Ejemplo de respuesta al recibir estado de cuenta (imagen o PDF):
-"Encontré 3 transacciones en tu estado de cuenta:
-
-1. 15/10 - Starbucks - S/45.00 (sugiero: Eating Out)
-2. 16/10 - Uber - S/28.50 (sugiero: Transportation)
-3. 17/10 - Wong - S/156.30 (sugiero: Groceries)
-
-¿En qué cuenta BCP quieres registrarlas? (Soles o Dólares)"
+**CUANDO USUARIO CONFIRME:**
+1. get_cached_transactions → recuperar transacciones guardadas
+2. get_ynab_accounts → obtener accountId de la cuenta que mencionó
+3. create_multiple_transactions → crear todas las transacciones
 
 Responde de forma conversacional, amigable y en español. Sé breve en WhatsApp (máximo 2-3 párrafos).`;
 
