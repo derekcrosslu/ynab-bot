@@ -7,6 +7,7 @@ const pdf = require('pdf-parse');
 const messageQueue = require('./message-queue');
 const analytics = require('./analytics');
 const { storage, UserStorage, CacheStorage } = require('./storage');
+const { normalizeMessage, hasIntent, isMenuOption, fuzzyMatch } = require('./message-normalizer');
 require('dotenv').config();
 
 // Configurar Claude
@@ -1601,18 +1602,23 @@ whatsappClient.on('message', async (msg) => {
         updateLastActivity(msg.from);
 
         // ===== NORMALIZACIÓN DE MENSAJES =====
-        // Detectar intents de navegación en lenguaje natural
-        const normalizedBody = msg.body.toLowerCase().trim();
-        const cancelIntents = ['cancel', 'cancelar', 'salir', 'exit'];
-        const backIntents = ['back', 'volver', 'atras', 'atrás', 'regresar'];
-        const helpIntents = ['ayuda', 'help', 'info'];
+        // Usar el normalizador completo para detectar intents
+        const normResult = normalizeMessage(msg.body);
+        console.log(`📝 Normalización: "${msg.body}" → "${normResult.normalized}" | Intents: [${normResult.intents.join(', ')}]`);
 
-        const isCancelIntent = cancelIntents.some(intent => normalizedBody === intent);
-        const isBackIntent = backIntents.some(intent => normalizedBody === intent);
-        const isHelpIntent = helpIntents.some(intent => normalizedBody === intent);
+        // Detectar intents específicos usando el normalizador
+        const isCancelIntent = hasIntent(msg.body, 'cancel');
+        const isBackIntent = hasIntent(msg.body, 'back');
+        const isHelpIntent = hasIntent(msg.body, 'help');
+        const isMenuIntent = hasIntent(msg.body, 'menu');
+        const isResetIntent = hasIntent(msg.body, 'reset');
+        const isDebugIntent = hasIntent(msg.body, 'debug');
+
+        // Verificar si es una opción de menú (0-9)
+        const menuOption = isMenuOption(msg.body);
 
         // Comandos especiales
-        if (msg.body.toLowerCase() === '/reset') {
+        if (msg.body.toLowerCase() === '/reset' || isResetIntent) {
             conversations.delete(msg.from);
             initializeUserMenuState(msg.from);
             messageQueue.clearQueue(msg.from); // Limpiar cola de mensajes
@@ -1622,7 +1628,7 @@ whatsappClient.on('message', async (msg) => {
             return;
         }
 
-        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done' || msg.body.toLowerCase() === '/cancel' || isCancelIntent) {
+        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done' || msg.body.toLowerCase() === '/cancel' || isCancelIntent || isMenuIntent) {
             // Volver al menú principal
             // End current flow if in conversation
             if (menuState.state === 'conversation' || menuState.state === 'waiting_document') {
@@ -1652,7 +1658,7 @@ whatsappClient.on('message', async (msg) => {
             }
         }
 
-        if (msg.body.toLowerCase() === '/debug') {
+        if (msg.body.toLowerCase() === '/debug' || isDebugIntent) {
             try {
                 const history = conversations.get(msg.from) || [];
                 const txCache = transactionCache.get(msg.from);
@@ -1743,6 +1749,12 @@ whatsappClient.on('message', async (msg) => {
                 debugMessage += `- Timeout: ${timeoutMinutes} min\n`;
                 debugMessage += `- Tiempo restante: ${remainingMinutes > 0 ? remainingMinutes : 0} min\n\n`;
             }
+
+            // Message normalization demo
+            debugMessage += `📝 *Normalización de Mensajes:*\n`;
+            debugMessage += `- Mensaje actual: "${msg.body}"\n`;
+            debugMessage += `- Normalizado: "${normResult.normalized}"\n`;
+            debugMessage += `- Intents detectados: ${normResult.intents.length > 0 ? normResult.intents.join(', ') : 'ninguno'}\n\n`;
 
                 debugMessage += `💡 Usa /reset para limpiar historial`;
 
