@@ -5,12 +5,16 @@ const fs = require('fs');
 const messageQueue = require('./message-queue');
 const analytics = require('./analytics');
 const { storage, UserStorage, CacheStorage } = require('./storage');
-const { normalizeMessage, hasIntent, isMenuOption, fuzzyMatch } = require('./message-normalizer');
+const { normalizeMessage, hasIntent, isMenuOption } = require('./message-normalizer');
 
 // ===== MODULAR SERVICES =====
 const ynabService = require('./services/ynab-service');
 const pdfService = require('./services/pdf-service');
 const stateManager = require('./adapters/state-manager');
+
+// ===== FLOW-BASED SYSTEM =====
+const flowRouter = require('./flows/router');
+const { ProcessPDFFlow } = require('./flows/index');
 
 require('dotenv').config();
 
@@ -18,6 +22,10 @@ require('dotenv').config();
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+// Set anthropic client in flow system
+flowRouter.setAnthropicClient(anthropic);
+ProcessPDFFlow.setAnthropicClient(anthropic);
 
 // Detectar el path de Chrome según el entorno
 function getChromePath() {
@@ -1358,39 +1366,36 @@ whatsappClient.on('message', async (msg) => {
         const normResult = normalizeMessage(msg.body);
         console.log(`📝 Normalización: "${msg.body}" → "${normResult.normalized}" | Intents: [${normResult.intents.join(', ')}]`);
 
-        // Detectar intents específicos usando el normalizador
-        const isCancelIntent = hasIntent(msg.body, 'cancel');
+        // Detectar intents específicos usando el normalizador (for menu navigation)
         const isBackIntent = hasIntent(msg.body, 'back');
-        const isHelpIntent = hasIntent(msg.body, 'help');
-        const isMenuIntent = hasIntent(msg.body, 'menu');
-        const isResetIntent = hasIntent(msg.body, 'reset');
-        const isDebugIntent = hasIntent(msg.body, 'debug');
 
-        // Verificar si es una opción de menú (0-9)
-        const menuOption = isMenuOption(msg.body);
+        // ===== GLOBAL SLASH COMMANDS (Force Exit) =====
+        // Only handle exact slash commands here - intent-based commands handled by flows
+        if (msg.body.toLowerCase() === '/reset') {
+            // Clear both flow state and menu state
+            const flowResponse = flowRouter.handleGlobalCommand(msg.from, '/reset');
 
-        // Comandos especiales
-        if (msg.body.toLowerCase() === '/reset' || isResetIntent) {
             stateManager.conversations.delete(msg.from);
             stateManager.initializeMenuState(msg.from);
-            messageQueue.clearQueue(msg.from); // Limpiar cola de mensajes
-            console.log(`🔄 Historial, menú y cola reiniciados para ${msg.from}`);
-            const welcomeMsg = stateManager.renderMenu('main');
-            await msg.reply(stateManager.addStatusFooter(welcomeMsg, msg.from));
+            messageQueue.clearQueue(msg.from);
+            console.log(`🔄 Flow state, menu state, and queue cleared for ${msg.from}`);
+
+            await msg.reply(stateManager.addStatusFooter(flowResponse || '🔄 Todo reiniciado. ¿En qué puedo ayudarte?', msg.from));
             return;
         }
 
-        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done' || msg.body.toLowerCase() === '/cancel' || isCancelIntent || isMenuIntent) {
-            // Volver al menú principal
-            // End current flow if in conversation
+        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done' || msg.body.toLowerCase() === '/cancel') {
+            // Force exit to menu (clears flows and conversations)
+            const flowResponse = flowRouter.handleGlobalCommand(msg.from, '/cancel');
+
             if (menuState.state === 'conversation' || menuState.state === 'waiting_document') {
                 analytics.endFlow(msg.from, 'user_cancelled', true);
                 console.log(`🚫 Usuario ${msg.from} canceló flow desde estado: ${menuState.state}`);
             }
             stateManager.conversations.delete(msg.from);
             stateManager.initializeMenuState(msg.from);
-            const welcomeMsg = stateManager.renderMenu('main');
-            await msg.reply(stateManager.addStatusFooter(welcomeMsg, msg.from));
+
+            await msg.reply(stateManager.addStatusFooter(flowResponse || '❌ Operación cancelada. Regresando al menú...', msg.from));
             return;
         }
 
@@ -1410,7 +1415,7 @@ whatsappClient.on('message', async (msg) => {
             }
         }
 
-        if (msg.body.toLowerCase() === '/debug' || isDebugIntent) {
+        if (msg.body.toLowerCase() === '/debug') {
             try {
                 const history = stateManager.conversations.get(msg.from) || [];
                 const txCache = stateManager.transactionCache.get(msg.from);
@@ -1531,7 +1536,7 @@ whatsappClient.on('message', async (msg) => {
             }
         }
 
-        if (msg.body.toLowerCase() === '/help' || isHelpIntent) {
+        if (msg.body.toLowerCase() === '/help') {
             const helpMsg = `🤖 *Ayuda - Bot YNAB*
 
 *Navegación por Menús:*
@@ -1621,6 +1626,29 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                 return;
             }
         }
+
+        // ===== FLOW-BASED ROUTING (PRIMARY) =====
+        // Try flow-based routing first before falling back to menu system
+        const flowResponse = await flowRouter.handleIncomingMessage(
+            msg.from,
+            msg.body,
+            {
+                hasDocument: msg.hasMedia,
+                isPDF: pdfText !== null,
+                isImage: imageData !== null,
+                pdfText: pdfText
+            }
+        );
+
+        if (flowResponse) {
+            console.log('✅ Message handled by flow system');
+            await msg.reply(stateManager.addStatusFooter(flowResponse, msg.from));
+            return;
+        }
+
+        // ===== MENU SYSTEM (FALLBACK) =====
+        // If no flow handled it, fall back to menu system
+        console.log('⏭️ No flow matched, using menu system');
 
         // Procesar según el estado actual
         if (menuState.state === 'menu') {
