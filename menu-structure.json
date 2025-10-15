@@ -1,0 +1,350 @@
+{
+  "version": "1.0",
+  "description": "Menu structure for WhatsApp YNAB Bot",
+  "root": {
+    "id": "main",
+    "title": "🏠 Menú Principal",
+    "level": 1,
+    "description": "Selecciona una opción",
+    "state_type": "menu",
+    "options": [
+      {
+        "key": "1",
+        "label": "Ver balances de cuentas",
+        "action": "navigate",
+        "next_menu": "select_budget_balances"
+      },
+      {
+        "key": "2",
+        "label": "Revisar transacciones recientes",
+        "action": "navigate",
+        "next_menu": "select_budget_transactions"
+      },
+      {
+        "key": "3",
+        "label": "Registrar gasto/ingreso (manual)",
+        "action": "navigate",
+        "next_menu": "select_budget_create"
+      },
+      {
+        "key": "4",
+        "label": "Categorizar transacciones pendientes",
+        "action": "navigate",
+        "next_menu": "select_budget_categorize"
+      },
+      {
+        "key": "5",
+        "label": "Registrar desde PDF/imagen (múltiples)",
+        "action": "navigate",
+        "next_menu": "extract_from_document"
+      },
+      {
+        "key": "0",
+        "label": "Ayuda / Información",
+        "action": "show_help",
+        "next_menu": "main"
+      }
+    ]
+  },
+  "menus": {
+    "select_budget_balances": {
+      "id": "select_budget_balances",
+      "title": "💰 Ver Balances",
+      "level": 2,
+      "description": "¿De qué presupuesto quieres ver los balances?",
+      "state_type": "menu",
+      "parent": "main",
+      "options": [
+        {
+          "key": "1",
+          "label": "BCP SOLES",
+          "action": "execute_claude",
+          "function": "show_balances",
+          "params": { "budgetName": "BCP SOLES" },
+          "return_to": "select_budget_balances"
+        },
+        {
+          "key": "2",
+          "label": "BCP DOLARES",
+          "action": "execute_claude",
+          "function": "show_balances",
+          "params": { "budgetName": "BCP DOLARES" },
+          "return_to": "select_budget_balances"
+        },
+        {
+          "key": "3",
+          "label": "USA BANKS",
+          "action": "navigate",
+          "next_menu": "select_account_usa"
+        },
+        {
+          "key": "0",
+          "label": "← Volver al menú principal",
+          "action": "navigate",
+          "next_menu": "main"
+        }
+      ]
+    },
+    "select_account_usa": {
+      "id": "select_account_usa",
+      "title": "🏦 Cuentas USA BANKS",
+      "level": 3,
+      "description": "¿De qué cuenta quieres ver el balance?",
+      "state_type": "menu",
+      "parent": "select_budget_balances",
+      "options": [
+        {
+          "key": "1",
+          "label": "CHASE 5061",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5061" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "2",
+          "label": "CHASE 5841",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5841" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "3",
+          "label": "PayPal",
+          "action": "execute_claude",
+          "function": "show_account_balance",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "PayPal" },
+          "return_to": "select_account_usa"
+        },
+        {
+          "key": "0",
+          "label": "← Volver",
+          "action": "navigate",
+          "next_menu": "select_budget_balances"
+        }
+      ]
+    },
+    "select_budget_transactions": {
+      "id": "select_budget_transactions",
+      "title": "📊 Revisar Transacciones",
+      "level": 2,
+      "description": "¿De qué presupuesto?",
+      "state_type": "menu",
+      "parent": "main",
+      "options": [
+        {
+          "key": "1",
+          "label": "BCP SOLES",
+          "action": "navigate",
+          "next_menu": "select_account_bcp_soles_tx"
+        },
+        {
+          "key": "2",
+          "label": "BCP DOLARES",
+          "action": "navigate",
+          "next_menu": "select_account_bcp_dolares_tx"
+        },
+        {
+          "key": "3",
+          "label": "USA BANKS",
+          "action": "navigate",
+          "next_menu": "select_account_usa_tx"
+        },
+        {
+          "key": "0",
+          "label": "← Volver al menú principal",
+          "action": "navigate",
+          "next_menu": "main"
+        }
+      ]
+    },
+    "select_account_bcp_soles_tx": {
+      "id": "select_account_bcp_soles_tx",
+      "title": "🏦 Transacciones BCP SOLES",
+      "level": 3,
+      "description": "¿De qué cuenta?",
+      "state_type": "menu",
+      "parent": "select_budget_transactions",
+      "options": [
+        {
+          "key": "1",
+          "label": "BCP 069",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "BCP SOLES", "accountFilter": "069" },
+          "return_to": "select_account_bcp_soles_tx"
+        },
+        {
+          "key": "2",
+          "label": "BCP 036",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "BCP SOLES", "accountFilter": "036" },
+          "return_to": "select_account_bcp_soles_tx"
+        },
+        {
+          "key": "3",
+          "label": "BCP 007",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "BCP SOLES", "accountFilter": "007" },
+          "return_to": "select_account_bcp_soles_tx"
+        },
+        {
+          "key": "0",
+          "label": "← Volver",
+          "action": "navigate",
+          "next_menu": "select_budget_transactions"
+        }
+      ]
+    },
+    "select_account_bcp_dolares_tx": {
+      "id": "select_account_bcp_dolares_tx",
+      "title": "🏦 Transacciones BCP DOLARES",
+      "level": 3,
+      "description": "¿De qué cuenta?",
+      "state_type": "menu",
+      "parent": "select_budget_transactions",
+      "options": [
+        {
+          "key": "1",
+          "label": "Cuenta BCP Dólares",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "BCP DOLARES" },
+          "return_to": "select_account_bcp_dolares_tx"
+        },
+        {
+          "key": "0",
+          "label": "← Volver",
+          "action": "navigate",
+          "next_menu": "select_budget_transactions"
+        }
+      ]
+    },
+    "select_account_usa_tx": {
+      "id": "select_account_usa_tx",
+      "title": "🏦 Transacciones USA BANKS",
+      "level": 3,
+      "description": "¿De qué cuenta?",
+      "state_type": "menu",
+      "parent": "select_budget_transactions",
+      "options": [
+        {
+          "key": "1",
+          "label": "CHASE 5061",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5061" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "2",
+          "label": "CHASE 5841",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "5841" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "3",
+          "label": "PayPal",
+          "action": "execute_claude",
+          "function": "show_transactions",
+          "params": { "budgetName": "USA BANKS", "accountFilter": "PayPal" },
+          "return_to": "select_account_usa_tx"
+        },
+        {
+          "key": "0",
+          "label": "← Volver",
+          "action": "navigate",
+          "next_menu": "select_budget_transactions"
+        }
+      ]
+    },
+    "select_budget_create": {
+      "id": "select_budget_create",
+      "title": "💵 Registrar Gasto/Ingreso",
+      "level": 2,
+      "description": "¿En qué presupuesto?",
+      "state_type": "menu",
+      "parent": "main",
+      "options": [
+        {
+          "key": "1",
+          "label": "BCP SOLES",
+          "action": "enter_conversation",
+          "function": "create_transaction_conversation",
+          "params": { "budgetName": "BCP SOLES" },
+          "return_to": "main"
+        },
+        {
+          "key": "2",
+          "label": "BCP DOLARES",
+          "action": "enter_conversation",
+          "function": "create_transaction_conversation",
+          "params": { "budgetName": "BCP DOLARES" },
+          "return_to": "main"
+        },
+        {
+          "key": "0",
+          "label": "← Volver al menú principal",
+          "action": "navigate",
+          "next_menu": "main"
+        }
+      ]
+    },
+    "select_budget_categorize": {
+      "id": "select_budget_categorize",
+      "title": "🏷️ Categorizar Pendientes",
+      "level": 2,
+      "description": "¿De qué presupuesto?",
+      "state_type": "menu",
+      "parent": "main",
+      "options": [
+        {
+          "key": "1",
+          "label": "BCP SOLES",
+          "action": "enter_conversation",
+          "function": "categorize_conversation",
+          "params": { "budgetName": "BCP SOLES" },
+          "return_to": "main"
+        },
+        {
+          "key": "2",
+          "label": "BCP DOLARES",
+          "action": "enter_conversation",
+          "function": "categorize_conversation",
+          "params": { "budgetName": "BCP DOLARES" },
+          "return_to": "main"
+        },
+        {
+          "key": "3",
+          "label": "USA BANKS",
+          "action": "enter_conversation",
+          "function": "categorize_conversation",
+          "params": { "budgetName": "USA BANKS" },
+          "return_to": "main"
+        },
+        {
+          "key": "0",
+          "label": "← Volver al menú principal",
+          "action": "navigate",
+          "next_menu": "main"
+        }
+      ]
+    },
+    "extract_from_document": {
+      "id": "extract_from_document",
+      "title": "📄 Registrar desde PDF/Imagen",
+      "level": 2,
+      "description": "Envía un PDF o imagen de tu estado de cuenta BCP. Puedes escribir 'BCP SOLES' o 'BCP DOLARES' junto con el archivo para especificar el presupuesto.",
+      "state_type": "waiting_document",
+      "parent": "main",
+      "conversation_mode": true,
+      "instructions": "El bot está esperando que envíes un PDF o imagen. Una vez recibido, Claude extraerá las transacciones conversacionalmente y te pedirá confirmación antes de crearlas.",
+      "return_to": "main"
+    }
+  }
+}

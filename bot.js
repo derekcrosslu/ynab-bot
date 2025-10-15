@@ -49,6 +49,192 @@ async function extractTextFromPDF(pdfBuffer) {
     }
 }
 
+// ===== SISTEMA DE MENÚS ESTRUCTURADOS =====
+
+// Cargar estructura de menús
+const menuStructure = JSON.parse(fs.readFileSync('./menu-structure.json', 'utf8'));
+
+// Estado de navegación por usuario
+const userMenuState = new Map();
+
+// Inicializar estado de menú para un usuario
+function initializeUserMenuState(userId) {
+    userMenuState.set(userId, {
+        currentMenu: 'main',
+        level: 1,
+        state: 'menu',  // 'menu', 'processing', 'conversation', 'waiting_document'
+        conversationContext: {},
+        menuPath: ['main']
+    });
+}
+
+// Obtener o crear estado de menú
+function getUserMenuState(userId) {
+    if (!userMenuState.has(userId)) {
+        initializeUserMenuState(userId);
+    }
+    return userMenuState.get(userId);
+}
+
+// Renderizar menú actual
+function renderMenu(menuId) {
+    const menu = menuId === 'main' ? menuStructure.root : menuStructure.menus[menuId];
+    if (!menu) {
+        return '❌ Menú no encontrado';
+    }
+
+    let menuText = `${menu.title}\n\n${menu.description}\n\n`;
+
+    menu.options.forEach(option => {
+        menuText += `*${option.key}*. ${option.label}\n`;
+    });
+
+    return menuText;
+}
+
+// Agregar Status Menu footer
+function addStatusFooter(message, userId) {
+    const state = getUserMenuState(userId);
+    const menu = state.currentMenu === 'main' ? menuStructure.root : menuStructure.menus[state.currentMenu];
+
+    let stateEmoji = '✅';
+    let stateText = 'Listo para input';
+
+    if (state.state === 'processing') {
+        stateEmoji = '⏳';
+        stateText = 'Procesando...';
+    } else if (state.state === 'conversation') {
+        stateEmoji = '💬';
+        stateText = 'En conversación';
+    } else if (state.state === 'waiting_document') {
+        stateEmoji = '📄';
+        stateText = 'Esperando documento';
+    }
+
+    const footer = `\n━━━━━━━━━━━━━━━━\n📍 *Status Menu:*\nNivel: ${state.level} - ${menu ? menu.title.replace(/[🏠💰📊💵🏷️📄]/g, '').trim() : 'Menu'} | Estado: ${stateEmoji} ${stateText}`;
+
+    return message + footer;
+}
+
+// Procesar selección de menú
+async function handleMenuSelection(userId, selection) {
+    const state = getUserMenuState(userId);
+    const menu = state.currentMenu === 'main' ? menuStructure.root : menuStructure.menus[state.currentMenu];
+
+    if (!menu) {
+        return { response: '❌ Error: menú no encontrado', stayInMenu: true };
+    }
+
+    const option = menu.options.find(opt => opt.key === selection.trim());
+
+    if (!option) {
+        return { response: '❌ Opción inválida. Por favor elige una opción del menú.', stayInMenu: true };
+    }
+
+    // Procesar acción
+    switch (option.action) {
+        case 'navigate':
+            // Navegar a otro menú
+            const nextMenu = option.next_menu === 'main' ? menuStructure.root : menuStructure.menus[option.next_menu];
+            state.currentMenu = option.next_menu;
+            state.level = nextMenu.level;
+            state.menuPath.push(option.next_menu);
+            userMenuState.set(userId, state);
+
+            return { response: renderMenu(option.next_menu), stayInMenu: true };
+
+        case 'execute_claude':
+            // Ejecutar función con Claude y volver
+            state.state = 'processing';
+            userMenuState.set(userId, state);
+            return {
+                response: null,
+                stayInMenu: false,
+                action: 'execute_claude',
+                function: option.function,
+                params: option.params,
+                returnTo: option.return_to
+            };
+
+        case 'enter_conversation':
+            // Entrar en modo conversacional
+            state.state = 'conversation';
+            state.conversationContext = option.params || {};
+            userMenuState.set(userId, state);
+            return {
+                response: null,
+                stayInMenu: false,
+                action: 'enter_conversation',
+                function: option.function,
+                params: option.params,
+                returnTo: option.return_to
+            };
+
+        case 'show_help':
+            return {
+                response: `🤖 *Ayuda del Bot YNAB*\n\nNavega usando los números de las opciones.\n\n📊 *Funcionalidades:*\n- Ver balances de tus cuentas\n- Revisar transacciones recientes\n- Registrar gastos/ingresos\n- Categorizar pendientes\n- Extraer de PDF/imagen\n\n*Comandos especiales:*\n/reset - Reiniciar\n/debug - Ver debug\n/help - Esta ayuda`,
+                stayInMenu: true
+            };
+
+        default:
+            return { response: '❌ Acción no reconocida', stayInMenu: true };
+    }
+}
+
+// Funciones ejecutoras de Claude para acciones del menú
+async function executeClaudeFunction(functionName, params, userId) {
+    switch (functionName) {
+        case 'show_balances':
+            return await executeClaudeBalances(params, userId);
+
+        case 'show_account_balance':
+            return await executeClaudeAccountBalance(params, userId);
+
+        case 'show_transactions':
+            return await executeClaudeTransactions(params, userId);
+
+        case 'create_transaction_conversation':
+            return await executeClaudeCreateTransaction(params, userId);
+
+        case 'categorize_conversation':
+            return await executeCategorizeConversation(params, userId);
+
+        default:
+            return '❌ Función no implementada';
+    }
+}
+
+// Mostrar balances de un presupuesto
+async function executeClaudeBalances(params, userId) {
+    const prompt = `Muestra los balances de todas las cuentas del presupuesto "${params.budgetName}". Usa get_ynab_accounts y muestra: nombre de cuenta, balance, y tipo. Sé breve y conciso.`;
+    return await askClaude(prompt, [], userId, null, null);
+}
+
+// Mostrar balance de una cuenta específica
+async function executeClaudeAccountBalance(params, userId) {
+    const prompt = `Muestra el balance de la cuenta que contenga "${params.accountFilter}" en el presupuesto "${params.budgetName}". Usa get_ynab_accounts y filtra la cuenta. Muestra balance y tipo. Sé breve.`;
+    return await askClaude(prompt, [], userId, null, null);
+}
+
+// Mostrar transacciones recientes
+async function executeClaudeTransactions(params, userId) {
+    const accountFilter = params.accountFilter ? ` que contenga "${params.accountFilter}"` : '';
+    const prompt = `Muestra las últimas 10 transacciones de la cuenta${accountFilter} del presupuesto "${params.budgetName}". Usa get_ynab_accounts primero para obtener el accountId, luego get_ynab_transactions. Muestra: fecha, payee, monto, categoría. Sé breve.`;
+    return await askClaude(prompt, [], userId, null, null);
+}
+
+// Crear transacción manual (modo conversacional)
+async function executeClaudeCreateTransaction(params, userId) {
+    const prompt = `El usuario quiere registrar una transacción manual en el presupuesto "${params.budgetName}". Pregúntale conversacionalmente: 1) ¿Es gasto o ingreso? 2) ¿Cuánto? 3) ¿Dónde/quién? 4) ¿Categoría? (opcional). Luego usa get_ynab_accounts para "${params.budgetName}" y create_ynab_transaction. Sé amigable y breve.`;
+    return await askClaude(prompt, [], userId, null, null);
+}
+
+// Categorizar transacciones (modo conversacional)
+async function executeCategorizeConversation(params, userId) {
+    const prompt = `El usuario quiere categorizar transacciones pendientes del presupuesto "${params.budgetName}". Usa get_ynab_transactions para obtener las pendientes, luego get_ynab_categories, y sugiere categorizaciones inteligentes. Pregunta si está de acuerdo antes de aplicar. Sé conversacional y amigable.`;
+    return await askClaude(prompt, [], userId, null, null);
+}
+
 const whatsappClient = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -1043,13 +1229,14 @@ Ejemplos:
 - "Agrega mi salario de $2000 en BCP dólares" → budgetName: "BCP DOLARES", amount: 2000, payee: "Salario"
 
 ANÁLISIS DE ESTADOS DE CUENTA (IMÁGENES Y PDFs):
-PASO 1 - OBTENER CATEGORÍAS DISPONIBLES:
-- ANTES de analizar la imagen o PDF, SIEMPRE llama primero a get_ynab_categories con budgetName
-- Esto te dará la lista EXACTA de categorías disponibles en YNAB
-- SOLO puedes sugerir categorías que aparezcan en esta lista
-- Si una categoría no existe en la respuesta, NO la sugieras
 
-PASO 2 - ANALIZAR EL ESTADO DE CUENTA BCP (IMAGEN O PDF):
+⚠️ **WORKFLOW OBLIGATORIO - SIGUE ESTOS PASOS EN ORDEN:**
+
+PASO 1 - OBTENER CATEGORÍAS:
+- Llama a get_ynab_categories con el budgetName que el usuario mencionó (BCP SOLES o BCP DOLARES)
+- Esto te dará las categorías exactas para sugerir
+
+PASO 2 - EXTRAER Y ANALIZAR LAS TRANSACCIONES:
 Los estados de cuenta BCP tienen esta estructura:
 - Columna **CARGOS/DEBE** (izquierda) = gastos/débitos → monto NEGATIVO
 - Columna **ABONOS/HABER** (derecha) = ingresos/créditos → monto POSITIVO
@@ -1279,11 +1466,24 @@ whatsappClient.on('message', async (msg) => {
 
         console.log(`📩 Procesando mensaje de ${msg.from}: ${msg.body}`);
 
+        // Obtener o inicializar estado de menú
+        const menuState = getUserMenuState(msg.from);
+
         // Comandos especiales
         if (msg.body.toLowerCase() === '/reset') {
             conversations.delete(msg.from);
-            console.log(`🔄 Historial limpiado para ${msg.from}`);
-            await msg.reply('✅ Conversación reiniciada. Todo el historial ha sido borrado.');
+            initializeUserMenuState(msg.from);
+            console.log(`🔄 Historial y menú reiniciados para ${msg.from}`);
+            const welcomeMsg = renderMenu('main');
+            await msg.reply(addStatusFooter(welcomeMsg, msg.from));
+            return;
+        }
+
+        if (msg.body.toLowerCase() === '/menu') {
+            // Volver al menú principal
+            initializeUserMenuState(msg.from);
+            const welcomeMsg = renderMenu('main');
+            await msg.reply(addStatusFooter(welcomeMsg, msg.from));
             return;
         }
 
@@ -1365,17 +1565,26 @@ whatsappClient.on('message', async (msg) => {
         }
 
         if (msg.body.toLowerCase() === '/help') {
-            await msg.reply(`🤖 *Comandos disponibles:*
+            const helpMsg = `🤖 *Ayuda - Bot YNAB*
 
-📊 Pregúntame sobre tus finanzas
-💰 "¿Cuál es mi balance?"
-📝 "Registra un gasto de $50 en Starbucks"
-📈 "¿Cuánto gasté este mes?"
-📷 Envía una foto de tu estado de cuenta para procesarla
-📄 Envía un PDF de tu estado de cuenta para procesarlo
-🔄 /reset - Reiniciar conversación
-🐛 /debug - Ver información completa del sistema
-❓ /help - Ver ayuda`);
+*Navegación por Menús:*
+Usa los números (1, 2, 3, etc.) para navegar por las opciones del menú.
+
+*Comandos disponibles:*
+📱 /menu - Volver al menú principal
+🔄 /reset - Reiniciar todo
+🐛 /debug - Ver información del sistema
+❓ /help - Ver esta ayuda
+
+*Funcionalidades:*
+• Ver balances de cuentas
+• Revisar transacciones recientes
+• Registrar gastos/ingresos
+• Categorizar pendientes
+• Extraer de PDF/imagen
+
+El bot combina menús estructurados con conversación inteligente de Claude AI.`;
+            await msg.reply(addStatusFooter(helpMsg, msg.from));
             return;
         }
 
@@ -1431,27 +1640,79 @@ whatsappClient.on('message', async (msg) => {
             }
         }
 
-        // Obtener historial de conversación
-        let history = conversations.get(msg.from) || [];
+        // Procesar según el estado actual
+        if (menuState.state === 'menu') {
+            // Modo menú: procesar selección
+            const menuResult = await handleMenuSelection(msg.from, msg.body);
 
-        // Procesar con Claude (pasar userId para caché de transacciones, la imagen o el PDF si existen)
-        const response = await askClaude(msg.body, history, msg.from, imageData, pdfText);
+            if (menuResult.stayInMenu) {
+                // Responder con el nuevo menú o mensaje
+                await msg.reply(addStatusFooter(menuResult.response, msg.from));
+                return;
+            }
 
-        // Guardar en historial
-        history.push(
-            { role: 'user', content: msg.body },
-            { role: 'assistant', content: response }
-        );
-        
-        // Limitar historial a últimos 10 mensajes
-        if (history.length > 20) {
-            history = history.slice(-20);
+            // Ejecutar acción fuera del menú
+            if (menuResult.action === 'execute_claude') {
+                // Ejecutar función con Claude
+                menuState.state = 'processing';
+                userMenuState.set(msg.from, menuState);
+
+                const claudeResponse = await executeClaudeFunction(
+                    menuResult.function,
+                    menuResult.params,
+                    msg.from
+                );
+
+                // Volver al menú
+                menuState.state = 'menu';
+                userMenuState.set(msg.from, menuState);
+
+                await msg.reply(addStatusFooter(claudeResponse, msg.from));
+                return;
+            }
+
+            if (menuResult.action === 'enter_conversation') {
+                // Entrar en modo conversacional
+                const conversationPrompt = await executeClaudeFunction(
+                    menuResult.function,
+                    menuResult.params,
+                    msg.from
+                );
+
+                await msg.reply(addStatusFooter(conversationPrompt, msg.from));
+                return;
+            }
         }
-        
-        conversations.set(msg.from, history);
 
-        // Responder
-        await msg.reply(response);
+        // Modo conversacional o procesamiento de PDF/imagen
+        if (menuState.state === 'conversation' || imageData || pdfText) {
+            let history = conversations.get(msg.from) || [];
+
+            // Procesar con Claude
+            const response = await askClaude(msg.body, history, msg.from, imageData, pdfText);
+
+            // Guardar en historial
+            history.push(
+                { role: 'user', content: msg.body },
+                { role: 'assistant', content: response }
+            );
+
+            // Limitar historial
+            if (history.length > 20) {
+                history = history.slice(-20);
+            }
+
+            conversations.set(msg.from, history);
+
+            // Responder con footer
+            await msg.reply(addStatusFooter(response, msg.from));
+            return;
+        }
+
+        // Si no estamos en ningún estado reconocido, mostrar menú principal
+        initializeUserMenuState(msg.from);
+        const welcomeMsg = renderMenu('main');
+        await msg.reply(addStatusFooter(welcomeMsg, msg.from));
 
     } catch (error) {
         console.error('Error procesando mensaje:', error);
