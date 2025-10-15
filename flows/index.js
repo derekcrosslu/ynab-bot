@@ -13,6 +13,7 @@ const AddExpenseFlow = require('./AddExpenseFlow');
 const ViewTransactionsFlow = require('./ViewTransactionsFlow');
 const ViewBalanceFlow = require('./ViewBalanceFlow');
 const ProcessPDFFlow = require('./ProcessPDFFlow');
+const ProcessImageFlow = require('./ProcessImageFlow');
 const CategorizeTransactionsFlow = require('./CategorizeTransactionsFlow');
 
 // Import child flows
@@ -83,6 +84,7 @@ module.exports.AddExpenseFlow = AddExpenseFlow;
 module.exports.ViewTransactionsFlow = ViewTransactionsFlow;
 module.exports.ViewBalanceFlow = ViewBalanceFlow;
 module.exports.ProcessPDFFlow = ProcessPDFFlow;
+module.exports.ProcessImageFlow = ProcessImageFlow;
 module.exports.CategorizeTransactionsFlow = CategorizeTransactionsFlow;
 
 // Export child flows

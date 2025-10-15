@@ -14,7 +14,7 @@ const stateManager = require('./adapters/state-manager');
 
 // ===== FLOW-BASED SYSTEM =====
 const flowRouter = require('./flows/router');
-const { ProcessPDFFlow } = require('./flows/index');
+const { ProcessPDFFlow, ProcessImageFlow } = require('./flows/index');
 
 require('dotenv').config();
 
@@ -26,6 +26,7 @@ const anthropic = new Anthropic({
 // Set anthropic client in flow system
 flowRouter.setAnthropicClient(anthropic);
 ProcessPDFFlow.setAnthropicClient(anthropic);
+ProcessImageFlow.setAnthropicClient(anthropic);
 
 // Detectar el path de Chrome según el entorno
 function getChromePath() {

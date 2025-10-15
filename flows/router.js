@@ -19,6 +19,7 @@ const AddExpenseFlow = require('./AddExpenseFlow');
 const ViewTransactionsFlow = require('./ViewTransactionsFlow');
 const ViewBalanceFlow = require('./ViewBalanceFlow');
 const ProcessPDFFlow = require('./ProcessPDFFlow');
+const ProcessImageFlow = require('./ProcessImageFlow');
 const CategorizeTransactionsFlow = require('./CategorizeTransactionsFlow');
 
 // TODO: Inject anthropic client
@@ -130,24 +131,31 @@ async function ruleBasedMatching(userId, messageText, options) {
         }
     }
 
-    // Check for document upload (PDF or Image)
-    if (options.hasDocument || options.isPDF || options.isImage) {
-        const docType = options.isPDF ? 'PDF' : options.isImage ? 'Image' : 'Document';
-        console.log(`✅ Matched flow: ProcessPDFFlow (${docType} upload)`);
+    // Check for PDF upload
+    if (options.isPDF && options.pdfText) {
+        console.log(`✅ Matched flow: ProcessPDFFlow (PDF upload)`);
 
         const flowInstance = new ProcessPDFFlow(userId, {
             anthropicClient: anthropicClient
         });
 
-        // Set PDF text if provided
-        if (options.pdfText) {
-            flowInstance.setPDFText(options.pdfText);
-        }
+        flowInstance.setPDFText(options.pdfText);
 
-        // Set image data if provided
-        if (options.imageData) {
-            flowInstance.setImageData(options.imageData);
-        }
+        flowState.startFlowForUser(userId, flowInstance);
+        const response = await flowInstance.onStart(messageText);
+
+        return response;
+    }
+
+    // Check for Image upload
+    if (options.isImage && options.imageData) {
+        console.log(`✅ Matched flow: ProcessImageFlow (Image upload)`);
+
+        const flowInstance = new ProcessImageFlow(userId, {
+            anthropicClient: anthropicClient
+        });
+
+        flowInstance.setImageData(options.imageData);
 
         flowState.startFlowForUser(userId, flowInstance);
         const response = await flowInstance.onStart(messageText);
@@ -304,8 +312,9 @@ function getHelpMessage() {
 - "Categorizar transacciones"
 - "Pendientes sin categoría"
 
-📄 *Procesar PDF*
+📄 *Procesar Documentos*
 - Envía un PDF de estado de cuenta
+- Envía una imagen de estado de cuenta
 
 *Comandos especiales:*
 /reset - Reiniciar sesión
