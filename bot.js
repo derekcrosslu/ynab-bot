@@ -1,13 +1,17 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const Anthropic = require('@anthropic-ai/sdk');
-const axios = require('axios');
 const fs = require('fs');
-const pdf = require('pdf-parse');
 const messageQueue = require('./message-queue');
 const analytics = require('./analytics');
 const { storage, UserStorage, CacheStorage } = require('./storage');
 const { normalizeMessage, hasIntent, isMenuOption, fuzzyMatch } = require('./message-normalizer');
+
+// ===== MODULAR SERVICES =====
+const ynabService = require('./services/ynab-service');
+const pdfService = require('./services/pdf-service');
+const stateManager = require('./adapters/state-manager');
+
 require('dotenv').config();
 
 // Configurar Claude
@@ -40,209 +44,7 @@ function getChromePath() {
     return undefined;
 }
 
-// Extraer texto de PDF
-async function extractTextFromPDF(pdfBuffer) {
-    try {
-        console.log('📄 Extrayendo texto del PDF...');
-        const data = await pdf(pdfBuffer);
-        console.log(`✅ Texto extraído: ${data.text.length} caracteres`);
-        return data.text;
-    } catch (error) {
-        console.error('Error extrayendo texto del PDF:', error);
-        throw error;
-    }
-}
-
-
-// ===== SISTEMA DE MENÚS ESTRUCTURADOS =====
-
-// Cargar estructura de menús
-const menuStructure = JSON.parse(fs.readFileSync('./menu-structure.json', 'utf8'));
-
-// Estado de navegación por usuario
-const userMenuState = new Map();
-
-// Inicializar estado de menú para un usuario
-function initializeUserMenuState(userId) {
-    userMenuState.set(userId, {
-        currentMenu: 'main',
-        level: 1,
-        state: 'menu',  // 'menu', 'processing', 'conversation', 'waiting_document'
-        conversationContext: {},
-        menuPath: ['main'],
-        lastActivity: Date.now() // Para session timeout
-    });
-}
-
-// Obtener o crear estado de menú
-function getUserMenuState(userId) {
-    if (!userMenuState.has(userId)) {
-        initializeUserMenuState(userId);
-    }
-    return userMenuState.get(userId);
-}
-
-// Configuración de session timeout
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutos
-
-// Verificar si la sesión expiró y resetear si es necesario
-function checkSessionTimeout(userId) {
-    const state = userMenuState.get(userId);
-    if (!state) return false; // No hay sesión
-
-    const inactiveTime = Date.now() - state.lastActivity;
-    const hasExpired = inactiveTime > SESSION_TIMEOUT_MS;
-
-    if (hasExpired) {
-        console.log(`⏰ Sesión expirada para ${userId} (inactivo por ${Math.floor(inactiveTime / 1000 / 60)} min)`);
-        // Limpiar todo
-        conversations.delete(userId);
-        transactionCache.delete(userId);
-        imageTransactionsCache.delete(userId);
-        pdfTextCache.delete(userId);
-        // Resetear estado
-        initializeUserMenuState(userId);
-        return true; // Sesión expiró
-    }
-
-    return false; // Sesión activa
-}
-
-// Actualizar timestamp de última actividad
-function updateLastActivity(userId) {
-    const state = userMenuState.get(userId);
-    if (state) {
-        state.lastActivity = Date.now();
-        userMenuState.set(userId, state);
-    }
-}
-
-// Renderizar menú actual
-function renderMenu(menuId) {
-    const menu = menuId === 'main' ? menuStructure.root : menuStructure.menus[menuId];
-    if (!menu) {
-        return '❌ Menú no encontrado';
-    }
-
-    let menuText = `${menu.title}\n\n${menu.description}\n\n`;
-
-    menu.options.forEach(option => {
-        menuText += `*${option.key}*. ${option.label}\n`;
-    });
-
-    return menuText;
-}
-
-// Agregar Status Menu footer
-function addStatusFooter(message, userId) {
-    const state = getUserMenuState(userId);
-    const menu = state.currentMenu === 'main' ? menuStructure.root : menuStructure.menus[state.currentMenu];
-
-    let stateEmoji = '✅';
-    let stateText = 'Listo para input';
-    let hint = '';
-
-    if (state.state === 'processing') {
-        stateEmoji = '⏳';
-        stateText = 'Procesando...';
-    } else if (state.state === 'conversation') {
-        stateEmoji = '💬';
-        stateText = 'En conversación';
-        hint = '\n💡 Escribe "cancelar" o /cancel para salir';
-    } else if (state.state === 'waiting_document') {
-        stateEmoji = '📄';
-        stateText = 'Esperando documento';
-        hint = '\n💡 Escribe "cancelar" o /cancel para salir';
-    }
-
-    const footer = `\n━━━━━━━━━━━━━━━━\n📍 *Status Menu:*\nNivel: ${state.level} - ${menu ? menu.title.replace(/[🏠💰📊💵🏷️📄]/g, '').trim() : 'Menu'} | Estado: ${stateEmoji} ${stateText}${hint}`;
-
-    return message + footer;
-}
-
-// Procesar selección de menú
-async function handleMenuSelection(userId, selection) {
-    const state = getUserMenuState(userId);
-    const menu = state.currentMenu === 'main' ? menuStructure.root : menuStructure.menus[state.currentMenu];
-
-    if (!menu) {
-        return { response: '❌ Error: menú no encontrado', stayInMenu: true };
-    }
-
-    const option = menu.options.find(opt => opt.key === selection.trim());
-
-    if (!option) {
-        return { response: '❌ Opción inválida. Por favor elige una opción del menú.', stayInMenu: true };
-    }
-
-    // Procesar acción
-    switch (option.action) {
-        case 'navigate':
-            // Navegar a otro menú
-            const nextMenu = option.next_menu === 'main' ? menuStructure.root : menuStructure.menus[option.next_menu];
-            state.currentMenu = option.next_menu;
-            state.level = nextMenu.level;
-            state.menuPath.push(option.next_menu);
-
-            // Actualizar estado según el tipo de menú
-            if (nextMenu.state_type) {
-                state.state = nextMenu.state_type;
-            } else {
-                state.state = 'menu';
-            }
-
-            userMenuState.set(userId, state);
-
-            // Si tiene opciones, renderizar menú normal
-            if (nextMenu.options) {
-                return { response: renderMenu(option.next_menu), stayInMenu: true };
-            }
-
-            // Si no tiene opciones (waiting_document), mostrar descripción
-            return {
-                response: `${nextMenu.title}\n\n${nextMenu.description}`,
-                stayInMenu: true
-            };
-
-        case 'execute_claude':
-            // Ejecutar función con Claude y volver
-            state.state = 'processing';
-            userMenuState.set(userId, state);
-            return {
-                response: null,
-                stayInMenu: false,
-                action: 'execute_claude',
-                function: option.function,
-                params: option.params,
-                returnTo: option.return_to
-            };
-
-        case 'enter_conversation':
-            // Entrar en modo conversacional
-            state.state = 'conversation';
-            state.conversationContext = option.params || {};
-            userMenuState.set(userId, state);
-            return {
-                response: null,
-                stayInMenu: false,
-                action: 'enter_conversation',
-                function: option.function,
-                params: option.params,
-                returnTo: option.return_to
-            };
-
-        case 'show_help':
-            return {
-                response: `🤖 *Ayuda del Bot YNAB*\n\nNavega usando los números de las opciones.\n\n📊 *Funcionalidades:*\n- Ver balances de tus cuentas\n- Revisar transacciones recientes\n- Registrar gastos/ingresos\n- Categorizar pendientes\n- Extraer de PDF/imagen\n\n*Comandos especiales:*\n/reset - Reiniciar\n/debug - Ver debug\n/help - Esta ayuda`,
-                stayInMenu: true
-            };
-
-        default:
-            return { response: '❌ Acción no reconocida', stayInMenu: true };
-    }
-}
-
-// Funciones ejecutoras de Claude para acciones del menú
+// ===== FUNCIONES EJECUTORAS DE CLAUDE PARA ACCIONES DEL MENÚ =====
 async function executeClaudeFunction(functionName, params, userId) {
     switch (functionName) {
         case 'show_balances':
@@ -312,182 +114,6 @@ const whatsappClient = new Client({
         executablePath: getChromePath()
     }
 });
-
-// ===== FUNCIONES PARA YNAB =====
-
-async function getYnabBudgets() {
-    try {
-        const response = await axios.get('https://api.ynab.com/v1/budgets', {
-            headers: {
-                'Authorization': `Bearer ${process.env.YNAB_API_KEY}`
-            }
-        });
-
-        return response.data.data.budgets;
-    } catch (error) {
-        console.error('Error obteniendo presupuestos:', error.message);
-        throw error;
-    }
-}
-
-async function getYnabAccounts(budgetName = null) {
-    try {
-        const budgets = await getYnabBudgets();
-
-        let targetBudget;
-        if (budgetName) {
-            // Buscar presupuesto por nombre (case-insensitive)
-            targetBudget = budgets.find(b =>
-                b.name.toUpperCase().includes(budgetName.toUpperCase())
-            );
-            if (!targetBudget) {
-                throw new Error(`No se encontró el presupuesto "${budgetName}"`);
-            }
-        } else {
-            // Si no se especifica, usar el primer presupuesto
-            targetBudget = budgets[0];
-        }
-
-        const accountsResponse = await axios.get(
-            `https://api.ynab.com/v1/budgets/${targetBudget.id}/accounts`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.YNAB_API_KEY}`
-                }
-            }
-        );
-
-        return {
-            budgetId: targetBudget.id,
-            budgetName: targetBudget.name,
-            accounts: accountsResponse.data.data.accounts,
-            allBudgets: budgets
-        };
-    } catch (error) {
-        console.error('Error obteniendo cuentas:', error.message);
-        throw error;
-    }
-}
-
-async function getYnabTransactions(budgetId, accountId = null, days = 90) {
-    try {
-        const url = accountId
-            ? `https://api.ynab.com/v1/budgets/${budgetId}/accounts/${accountId}/transactions`
-            : `https://api.ynab.com/v1/budgets/${budgetId}/transactions`;
-
-        const response = await axios.get(url, {
-            headers: {
-                'Authorization': `Bearer ${process.env.YNAB_API_KEY}`
-            },
-            params: {
-                since_date: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-            }
-        });
-
-        return response.data.data.transactions;
-    } catch (error) {
-        console.error('Error obteniendo transacciones:', error.message);
-        throw error;
-    }
-}
-
-async function createYnabTransaction(budgetId, accountId, amount, payee, categoryId, memo, date = null) {
-    try {
-        const transactionData = {
-            account_id: accountId,
-            date: date || new Date().toISOString().split('T')[0],  // Usar fecha proporcionada o hoy
-            amount: Math.round(amount * 1000), // YNAB usa miliunidades
-            payee_name: payee,
-            memo: memo,
-            cleared: 'cleared'
-        };
-
-        // Agregar category_id solo si se proporciona
-        if (categoryId) {
-            transactionData.category_id = categoryId;
-        }
-
-        const response = await axios.post(
-            `https://api.ynab.com/v1/budgets/${budgetId}/transactions`,
-            {
-                transaction: transactionData
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.YNAB_API_KEY}`
-                }
-            }
-        );
-
-        return response.data.data.transaction;
-    } catch (error) {
-        console.error('Error creando transacción:', error.message);
-        throw error;
-    }
-}
-
-async function getYnabCategories(budgetId) {
-    try {
-        const response = await axios.get(
-            `https://api.ynab.com/v1/budgets/${budgetId}/categories`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.YNAB_API_KEY}`
-                }
-            }
-        );
-
-        const categories = [];
-        response.data.data.category_groups.forEach(group => {
-            if (!group.hidden && !group.deleted) {
-                group.categories.forEach(cat => {
-                    if (!cat.hidden && !cat.deleted) {
-                        categories.push({
-                            id: cat.id,
-                            name: cat.name,
-                            group: group.name
-                        });
-                    }
-                });
-            }
-        });
-
-        return categories;
-    } catch (error) {
-        console.error('Error obteniendo categorías:', error.message);
-        throw error;
-    }
-}
-
-async function updateYnabTransaction(budgetId, transactionId, categoryId, keepApprovedStatus = false) {
-    try {
-        const transactionUpdate = {
-            category_id: categoryId
-        };
-
-        // Solo cambiar approved si no queremos mantener el estado actual
-        if (!keepApprovedStatus) {
-            transactionUpdate.approved = true;
-        }
-
-        const response = await axios.put(
-            `https://api.ynab.com/v1/budgets/${budgetId}/transactions/${transactionId}`,
-            {
-                transaction: transactionUpdate
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.YNAB_API_KEY}`
-                }
-            }
-        );
-
-        return response.data.data.transaction;
-    } catch (error) {
-        console.error('Error actualizando transacción:', error.message);
-        throw error;
-    }
-}
 
 // ===== DEFINICIÓN DE HERRAMIENTAS PARA CLAUDE =====
 
@@ -738,7 +364,7 @@ const tools = [
 
 async function executeToolCall(toolName, toolInput, userId = 'default') {
     // Track tool call in debug stats
-    const userStats = debugStats.get(userId) || {
+    const userStats = stateManager.debugStats.get(userId) || {
         lastToolCalls: [],
         imagesProcessed: 0,
         pdfsProcessed: 0,
@@ -757,7 +383,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
         userStats.lastToolCalls = userStats.lastToolCalls.slice(0, 10);
     }
 
-    debugStats.set(userId, userStats);
+    stateManager.debugStats.set(userId, userStats);
 
     // Track tool use in analytics
     analytics.trackEvent(userId, 'tool_use', { toolName, input: toolInput });
@@ -765,7 +391,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
     try {
         switch(toolName) {
             case 'get_ynab_budgets':
-                const budgets = await getYnabBudgets();
+                const budgets = await ynabService.getBudgets();
                 return {
                     budgets: budgets.map(b => ({
                         id: b.id,
@@ -775,13 +401,13 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 };
 
             case 'get_ynab_accounts':
-                const ynabData = await getYnabAccounts(toolInput.budgetName || null);
+                const ynabData = await ynabService.getAccounts(toolInput.budgetName || null);
 
                 // Track budget context
-                const stats = debugStats.get(userId);
+                const stats = stateManager.debugStats.get(userId);
                 if (stats) {
                     stats.lastBudget = ynabData.budgetName;
-                    debugStats.set(userId, stats);
+                    stateManager.debugStats.set(userId, stats);
                 }
 
                 return {
@@ -797,10 +423,10 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'get_ynab_transactions':
                 // Obtener budgetId del presupuesto especificado o el primero
-                const txYnabData = await getYnabAccounts(toolInput.budgetName || null);
+                const txYnabData = await ynabService.getAccounts(toolInput.budgetName || null);
                 const txBudgetId = txYnabData.budgetId;
 
-                const transactions = await getYnabTransactions(
+                const transactions = await ynabService.getTransactions(
                     txBudgetId,
                     toolInput.accountId || null,
                     toolInput.days || 90
@@ -835,7 +461,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                     };
                 });
 
-                transactionCache.set(userId, userCache);
+                stateManager.transactionCache.set(userId, userCache);
                 console.log(`💾 Guardadas ${Object.keys(userCache.transactions).length} transacciones en caché para ${userId}`);
 
                 return {
@@ -854,7 +480,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'create_ynab_transaction':
                 // Obtener datos del presupuesto
-                const createYnabData = await getYnabAccounts(toolInput.budgetName || null);
+                const createYnabData = await ynabService.getAccounts(toolInput.budgetName || null);
                 const createBudgetId = createYnabData.budgetId;
 
                 // Validar que la cuenta exista
@@ -881,7 +507,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
                 // Si se proporcionó un nombre de categoría, buscarla
                 if (toolInput.categoryName) {
-                    const allCategories = await getYnabCategories(createBudgetId);
+                    const allCategories = await ynabService.getCategories(createBudgetId);
                     let targetCategory = allCategories.find(cat =>
                         cat.name === toolInput.categoryName
                     );
@@ -908,7 +534,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                     console.log(`   ✓ Categoría para nueva transacción: ${targetCategory.name} (ID: ${categoryId})`);
                 }
 
-                const newTransaction = await createYnabTransaction(
+                const newTransaction = await ynabService.createTransaction(
                     createBudgetId,
                     toolInput.accountId,
                     toolInput.amount,
@@ -929,10 +555,10 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'get_ynab_categories':
                 // Obtener budgetId del presupuesto especificado o el primero
-                const catYnabData = await getYnabAccounts(toolInput.budgetName || null);
+                const catYnabData = await ynabService.getAccounts(toolInput.budgetName || null);
                 const catBudgetId = catYnabData.budgetId;
 
-                const categories = await getYnabCategories(catBudgetId);
+                const categories = await ynabService.getCategories(catBudgetId);
                 // Agrupar por grupo para mejor presentación
                 const categoryGroups = {};
                 categories.forEach(cat => {
@@ -952,7 +578,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'categorize_transaction':
                 // Obtener budgetId del presupuesto especificado o el primero
-                const categYnabData = await getYnabAccounts(toolInput.budgetName || null);
+                const categYnabData = await ynabService.getAccounts(toolInput.budgetName || null);
                 const categBudgetId = categYnabData.budgetId;
 
                 console.log(`🏷️  Intentando categorizar:`);
@@ -964,7 +590,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
                 // MÉTODO 1: Buscar por índice en el caché (PREFERIDO)
                 if (toolInput.index) {
-                    const userCache = transactionCache.get(userId);
+                    const userCache = stateManager.transactionCache.get(userId);
 
                     if (!userCache) {
                         return {
@@ -993,7 +619,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 }
                 // MÉTODO 2: Buscar por nombre de payee (FALLBACK)
                 else if (toolInput.payee) {
-                    const allTransactions = await getYnabTransactions(
+                    const allTransactions = await ynabService.getTransactions(
                         categBudgetId,
                         toolInput.accountId || null,
                         90
@@ -1043,7 +669,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 }
 
                 // Buscar la categoría por nombre (búsqueda exacta case-sensitive)
-                const allCategories = await getYnabCategories(categBudgetId);
+                const allCategories = await ynabService.getCategories(categBudgetId);
                 let targetCategory = allCategories.find(cat =>
                     cat.name === toolInput.categoryName
                 );
@@ -1069,7 +695,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 console.log(`   ✓ Categoría encontrada: ${targetCategory.name} (ID: ${targetCategory.id})`);
 
                 // Actualizar la transacción
-                const updatedTx = await updateYnabTransaction(
+                const updatedTx = await ynabService.updateTransaction(
                     categBudgetId,
                     transactionId,  // ← Usar el ID que encontramos (del caché o de la búsqueda)
                     targetCategory.id
@@ -1089,7 +715,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'create_multiple_transactions':
                 // Obtener datos del presupuesto
-                const multiYnabData = await getYnabAccounts(toolInput.budgetName || null);
+                const multiYnabData = await ynabService.getAccounts(toolInput.budgetName || null);
                 const multiBudgetId = multiYnabData.budgetId;
 
                 console.log(`📝 Creando múltiples transacciones: ${toolInput.transactions.length} transacciones`);
@@ -1115,7 +741,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 }
 
                 // Obtener todas las categorías una vez
-                const allCategoriesForMulti = await getYnabCategories(multiBudgetId);
+                const allCategoriesForMulti = await ynabService.getCategories(multiBudgetId);
 
                 // Crear transacciones en secuencia
                 const createdTransactions = [];
@@ -1146,7 +772,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                             }
                         }
 
-                        const createdTx = await createYnabTransaction(
+                        const createdTx = await ynabService.createTransaction(
                             multiBudgetId,
                             toolInput.accountId,
                             tx.amount,
@@ -1187,7 +813,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'cache_extracted_transactions':
                 // Guardar transacciones en caché temporal
-                imageTransactionsCache.set(userId, {
+                stateManager.imageTransactionsCache.set(userId, {
                     timestamp: Date.now(),
                     budgetName: toolInput.budgetName,
                     transactions: toolInput.transactions
@@ -1202,7 +828,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'get_cached_transactions':
                 // Recuperar transacciones del caché
-                const cachedData = imageTransactionsCache.get(userId);
+                const cachedData = stateManager.imageTransactionsCache.get(userId);
                 if (!cachedData) {
                     return {
                         error: "No hay transacciones en caché. Necesito que primero me envíes un estado de cuenta (imagen o PDF) para extraer las transacciones."
@@ -1212,7 +838,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 // Validar que el caché no sea muy antiguo (30 minutos)
                 const cacheAge = Date.now() - cachedData.timestamp;
                 if (cacheAge > 30 * 60 * 1000) {
-                    imageTransactionsCache.delete(userId);
+                    stateManager.imageTransactionsCache.delete(userId);
                     return {
                         error: "El caché de transacciones expiró (más de 30 minutos). Por favor envía el estado de cuenta de nuevo."
                     };
@@ -1240,7 +866,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
 
             case 'extract_transactions_from_pdf_text':
                 // Recuperar texto del PDF del caché
-                const pdfCachedData = pdfTextCache.get(userId);
+                const pdfCachedData = stateManager.pdfTextCache.get(userId);
                 if (!pdfCachedData) {
                     return {
                         error: "No hay texto de PDF en caché. Por favor envía el PDF de nuevo."
@@ -1250,7 +876,7 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
                 // Validar que el caché no sea muy antiguo (5 minutos)
                 const pdfCacheAge = Date.now() - pdfCachedData.timestamp;
                 if (pdfCacheAge > 5 * 60 * 1000) {
-                    pdfTextCache.delete(userId);
+                    stateManager.pdfTextCache.delete(userId);
                     return {
                         error: "El caché del PDF expiró. Por favor envía el PDF de nuevo."
                     };
@@ -1537,20 +1163,12 @@ whatsappClient.on('ready', () => {
     console.log('💬 Ya puedes enviar mensajes');
 });
 
-// Almacenar conversaciones por usuario (in-memory)
-const conversations = new Map();
-
-// Caché temporal de transacciones por usuario (para categorización)
-const transactionCache = new Map();
-
-// Caché de transacciones extraídas de imágenes (pendientes de crear en YNAB)
-const imageTransactionsCache = new Map();
-
-// Caché temporal de texto extraído de PDFs (para procesamiento)
-const pdfTextCache = new Map();
-
-// Estadísticas de debug por usuario
-const debugStats = new Map();
+// NOTA: All state and caches are now managed by stateManager
+// - conversations → stateManager.conversations
+// - transactionCache → stateManager.transactionCache
+// - imageTransactionsCache → stateManager.imageTransactionsCache
+// - pdfTextCache → stateManager.pdfTextCache
+// - debugStats → stateManager.debugStats
 
 // NOTA: storage.js está disponible para migración futura
 // Para integrar: reemplazar Maps con CacheStorage.get/set
@@ -1584,22 +1202,22 @@ whatsappClient.on('message', async (msg) => {
         });
 
         // Obtener o inicializar estado de menú
-        const menuState = getUserMenuState(msg.from);
+        const menuState = stateManager.getMenuState(msg.from);
 
         // ===== SESSION TIMEOUT CHECK =====
         // Verificar si la sesión expiró por inactividad (30 min)
-        const sessionExpired = checkSessionTimeout(msg.from);
+        const sessionExpired = stateManager.checkSessionTimeout(msg.from);
         if (sessionExpired) {
             console.log(`⏰ Notificando sesión expirada a ${msg.from}`);
-            const expiredMsg = `⏰ *Sesión Expirada*\n\nTu sesión expiró por inactividad (más de 30 minutos).\nTodo ha sido reiniciado. Empecemos de nuevo:\n\n${renderMenu('main')}`;
-            await msg.reply(addStatusFooter(expiredMsg, msg.from));
+            const expiredMsg = `⏰ *Sesión Expirada*\n\nTu sesión expiró por inactividad (más de 30 minutos).\nTodo ha sido reiniciado. Empecemos de nuevo:\n\n${stateManager.renderMenu('main')}`;
+            await msg.reply(stateManager.addStatusFooter(expiredMsg, msg.from));
             // Actualizar timestamp después de resetear
-            updateLastActivity(msg.from);
+            stateManager.updateLastActivity(msg.from);
             return;
         }
 
         // Actualizar timestamp de última actividad
-        updateLastActivity(msg.from);
+        stateManager.updateLastActivity(msg.from);
 
         // ===== NORMALIZACIÓN DE MENSAJES =====
         // Usar el normalizador completo para detectar intents
@@ -1619,12 +1237,12 @@ whatsappClient.on('message', async (msg) => {
 
         // Comandos especiales
         if (msg.body.toLowerCase() === '/reset' || isResetIntent) {
-            conversations.delete(msg.from);
-            initializeUserMenuState(msg.from);
+            stateManager.conversations.delete(msg.from);
+            stateManager.initializeMenuState(msg.from);
             messageQueue.clearQueue(msg.from); // Limpiar cola de mensajes
             console.log(`🔄 Historial, menú y cola reiniciados para ${msg.from}`);
-            const welcomeMsg = renderMenu('main');
-            await msg.reply(addStatusFooter(welcomeMsg, msg.from));
+            const welcomeMsg = stateManager.renderMenu('main');
+            await msg.reply(stateManager.addStatusFooter(welcomeMsg, msg.from));
             return;
         }
 
@@ -1635,10 +1253,10 @@ whatsappClient.on('message', async (msg) => {
                 analytics.endFlow(msg.from, 'user_cancelled', true);
                 console.log(`🚫 Usuario ${msg.from} canceló flow desde estado: ${menuState.state}`);
             }
-            conversations.delete(msg.from);
-            initializeUserMenuState(msg.from);
-            const welcomeMsg = renderMenu('main');
-            await msg.reply(addStatusFooter(welcomeMsg, msg.from));
+            stateManager.conversations.delete(msg.from);
+            stateManager.initializeMenuState(msg.from);
+            const welcomeMsg = stateManager.renderMenu('main');
+            await msg.reply(stateManager.addStatusFooter(welcomeMsg, msg.from));
             return;
         }
 
@@ -1650,19 +1268,19 @@ whatsappClient.on('message', async (msg) => {
             // En conversación o waiting_document, "back" funciona como cancel
             if (menuState.state === 'conversation' || menuState.state === 'waiting_document') {
                 analytics.endFlow(msg.from, 'user_went_back', true);
-                conversations.delete(msg.from);
-                initializeUserMenuState(msg.from);
-                const welcomeMsg = renderMenu('main');
-                await msg.reply(addStatusFooter(welcomeMsg, msg.from));
+                stateManager.conversations.delete(msg.from);
+                stateManager.initializeMenuState(msg.from);
+                const welcomeMsg = stateManager.renderMenu('main');
+                await msg.reply(stateManager.addStatusFooter(welcomeMsg, msg.from));
                 return;
             }
         }
 
         if (msg.body.toLowerCase() === '/debug' || isDebugIntent) {
             try {
-                const history = conversations.get(msg.from) || [];
-                const txCache = transactionCache.get(msg.from);
-                const userStats = debugStats.get(msg.from);
+                const history = stateManager.conversations.get(msg.from) || [];
+                const txCache = stateManager.transactionCache.get(msg.from);
+                const userStats = stateManager.debugStats.get(msg.from);
                 const memUsage = process.memoryUsage();
 
                 console.log(`📊 Debug para ${msg.from}:`);
@@ -1739,10 +1357,10 @@ whatsappClient.on('message', async (msg) => {
             }
 
             // Session timeout info
-            const sessionState = userMenuState.get(msg.from);
+            const sessionState = stateManager.userMenuState.get(msg.from);
             if (sessionState && sessionState.lastActivity) {
                 const sessionAge = Math.floor((Date.now() - sessionState.lastActivity) / 1000 / 60);
-                const timeoutMinutes = Math.floor(SESSION_TIMEOUT_MS / 1000 / 60);
+                const timeoutMinutes = Math.floor(stateManager.SESSION_TIMEOUT_MS / 1000 / 60);
                 const remainingMinutes = timeoutMinutes - sessionAge;
                 debugMessage += `⏰ *Sesión:*\n`;
                 debugMessage += `- Activo hace: ${sessionAge} min\n`;
@@ -1795,7 +1413,7 @@ También puedes escribir:
 • Extraer de PDF/imagen
 
 El bot combina menús estructurados con conversación inteligente de Claude AI.`;
-            await msg.reply(addStatusFooter(helpMsg, msg.from));
+            await msg.reply(stateManager.addStatusFooter(helpMsg, msg.from));
             return;
         }
 
@@ -1816,7 +1434,7 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                     console.log(`✅ Imagen descargada: ${media.mimetype}`);
 
                     // Track image processing
-                    const userStats = debugStats.get(msg.from) || {
+                    const userStats = stateManager.debugStats.get(msg.from) || {
                         lastToolCalls: [],
                         imagesProcessed: 0,
                         pdfsProcessed: 0,
@@ -1824,24 +1442,24 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                         lastAccount: null
                     };
                     userStats.imagesProcessed++;
-                    debugStats.set(msg.from, userStats);
+                    stateManager.debugStats.set(msg.from, userStats);
                 }
                 // Procesar PDFs
                 else if (media.mimetype === 'application/pdf') {
                     console.log('📄 PDF detectado, extrayendo texto...');
                     const pdfBuffer = Buffer.from(media.data, 'base64');
-                    pdfText = await extractTextFromPDF(pdfBuffer);
+                    pdfText = await pdfService.extractText(pdfBuffer);
                     console.log(`✅ PDF procesado: ${pdfText.length} caracteres extraídos`);
 
                     // Guardar texto del PDF en caché para que las herramientas puedan accederlo
-                    pdfTextCache.set(msg.from, {
+                    stateManager.pdfTextCache.set(msg.from, {
                         timestamp: Date.now(),
                         text: pdfText
                     });
                     console.log(`💾 PDF text guardado en caché para ${msg.from}`);
 
                     // Track PDF processing
-                    const userStats = debugStats.get(msg.from) || {
+                    const userStats = stateManager.debugStats.get(msg.from) || {
                         lastToolCalls: [],
                         imagesProcessed: 0,
                         pdfsProcessed: 0,
@@ -1849,7 +1467,7 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                         lastAccount: null
                     };
                     userStats.pdfsProcessed++;
-                    debugStats.set(msg.from, userStats);
+                    stateManager.debugStats.set(msg.from, userStats);
                 }
             } catch (error) {
                 console.error('Error descargando/procesando media:', error);
@@ -1861,11 +1479,11 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
         // Procesar según el estado actual
         if (menuState.state === 'menu') {
             // Modo menú: procesar selección
-            const menuResult = await handleMenuSelection(msg.from, msg.body);
+            const menuResult = await stateManager.handleMenuSelection(msg.from, msg.body);
 
             if (menuResult.stayInMenu) {
                 // Responder con el nuevo menú o mensaje
-                await msg.reply(addStatusFooter(menuResult.response, msg.from));
+                await msg.reply(stateManager.addStatusFooter(menuResult.response, msg.from));
                 return;
             }
 
@@ -1873,7 +1491,7 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
             if (menuResult.action === 'execute_claude') {
                 // Ejecutar función con Claude
                 menuState.state = 'processing';
-                userMenuState.set(msg.from, menuState);
+                stateManager.setMenuState(msg.from, menuState);
 
                 const claudeResponse = await executeClaudeFunction(
                     menuResult.function,
@@ -1883,9 +1501,9 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
 
                 // Volver al menú
                 menuState.state = 'menu';
-                userMenuState.set(msg.from, menuState);
+                stateManager.setMenuState(msg.from, menuState);
 
-                await msg.reply(addStatusFooter(claudeResponse, msg.from));
+                await msg.reply(stateManager.addStatusFooter(claudeResponse, msg.from));
                 return;
             }
 
@@ -1899,19 +1517,19 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                     msg.from
                 );
 
-                await msg.reply(addStatusFooter(conversationPrompt, msg.from));
+                await msg.reply(stateManager.addStatusFooter(conversationPrompt, msg.from));
                 return;
             }
         }
 
         // Modo conversacional, waiting_document, o procesamiento de PDF/imagen
         if (menuState.state === 'conversation' || menuState.state === 'waiting_document' || imageData || pdfText) {
-            let history = conversations.get(msg.from) || [];
+            let history = stateManager.conversations.get(msg.from) || [];
 
             // Si recibimos PDF/imagen en waiting_document, cambiar a modo conversación
             if ((imageData || pdfText) && menuState.state === 'waiting_document') {
                 menuState.state = 'conversation';
-                userMenuState.set(msg.from, menuState);
+                stateManager.setMenuState(msg.from, menuState);
             }
 
             // Procesar con Claude
@@ -1928,17 +1546,17 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                 history = history.slice(-20);
             }
 
-            conversations.set(msg.from, history);
+            stateManager.conversations.set(msg.from, history);
 
             // Responder con footer
-            await msg.reply(addStatusFooter(response, msg.from));
+            await msg.reply(stateManager.addStatusFooter(response, msg.from));
             return;
         }
 
         // Si no estamos en ningún estado reconocido, mostrar menú principal
-        initializeUserMenuState(msg.from);
-        const welcomeMsg = renderMenu('main');
-        await msg.reply(addStatusFooter(welcomeMsg, msg.from));
+        stateManager.initializeMenuState(msg.from);
+        const welcomeMsg = stateManager.renderMenu('main');
+        await msg.reply(stateManager.addStatusFooter(welcomeMsg, msg.from));
 
         } catch (error) {
             console.error('Error procesando mensaje:', error);
