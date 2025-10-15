@@ -68,7 +68,8 @@ function initializeUserMenuState(userId) {
         level: 1,
         state: 'menu',  // 'menu', 'processing', 'conversation', 'waiting_document'
         conversationContext: {},
-        menuPath: ['main']
+        menuPath: ['main'],
+        lastActivity: Date.now() // Para session timeout
     });
 }
 
@@ -78,6 +79,41 @@ function getUserMenuState(userId) {
         initializeUserMenuState(userId);
     }
     return userMenuState.get(userId);
+}
+
+// Configuración de session timeout
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutos
+
+// Verificar si la sesión expiró y resetear si es necesario
+function checkSessionTimeout(userId) {
+    const state = userMenuState.get(userId);
+    if (!state) return false; // No hay sesión
+
+    const inactiveTime = Date.now() - state.lastActivity;
+    const hasExpired = inactiveTime > SESSION_TIMEOUT_MS;
+
+    if (hasExpired) {
+        console.log(`⏰ Sesión expirada para ${userId} (inactivo por ${Math.floor(inactiveTime / 1000 / 60)} min)`);
+        // Limpiar todo
+        conversations.delete(userId);
+        transactionCache.delete(userId);
+        imageTransactionsCache.delete(userId);
+        pdfTextCache.delete(userId);
+        // Resetear estado
+        initializeUserMenuState(userId);
+        return true; // Sesión expiró
+    }
+
+    return false; // Sesión activa
+}
+
+// Actualizar timestamp de última actividad
+function updateLastActivity(userId) {
+    const state = userMenuState.get(userId);
+    if (state) {
+        state.lastActivity = Date.now();
+        userMenuState.set(userId, state);
+    }
 }
 
 // Renderizar menú actual
@@ -1549,6 +1585,21 @@ whatsappClient.on('message', async (msg) => {
         // Obtener o inicializar estado de menú
         const menuState = getUserMenuState(msg.from);
 
+        // ===== SESSION TIMEOUT CHECK =====
+        // Verificar si la sesión expiró por inactividad (30 min)
+        const sessionExpired = checkSessionTimeout(msg.from);
+        if (sessionExpired) {
+            console.log(`⏰ Notificando sesión expirada a ${msg.from}`);
+            const expiredMsg = `⏰ *Sesión Expirada*\n\nTu sesión expiró por inactividad (más de 30 minutos).\nTodo ha sido reiniciado. Empecemos de nuevo:\n\n${renderMenu('main')}`;
+            await msg.reply(addStatusFooter(expiredMsg, msg.from));
+            // Actualizar timestamp después de resetear
+            updateLastActivity(msg.from);
+            return;
+        }
+
+        // Actualizar timestamp de última actividad
+        updateLastActivity(msg.from);
+
         // ===== NORMALIZACIÓN DE MENSAJES =====
         // Detectar intents de navegación en lenguaje natural
         const normalizedBody = msg.body.toLowerCase().trim();
@@ -1679,6 +1730,18 @@ whatsappClient.on('message', async (msg) => {
                 debugMessage += `- Total eventos: ${analyticsData.totalEvents}\n`;
                 debugMessage += `- Mensajes: ${analyticsData.session.messageCount}\n`;
                 debugMessage += `- Tool calls: ${analyticsData.session.toolCalls}\n\n`;
+            }
+
+            // Session timeout info
+            const sessionState = userMenuState.get(msg.from);
+            if (sessionState && sessionState.lastActivity) {
+                const sessionAge = Math.floor((Date.now() - sessionState.lastActivity) / 1000 / 60);
+                const timeoutMinutes = Math.floor(SESSION_TIMEOUT_MS / 1000 / 60);
+                const remainingMinutes = timeoutMinutes - sessionAge;
+                debugMessage += `⏰ *Sesión:*\n`;
+                debugMessage += `- Activo hace: ${sessionAge} min\n`;
+                debugMessage += `- Timeout: ${timeoutMinutes} min\n`;
+                debugMessage += `- Tiempo restante: ${remainingMinutes > 0 ? remainingMinutes : 0} min\n\n`;
             }
 
                 debugMessage += `💡 Usa /reset para limpiar historial`;
