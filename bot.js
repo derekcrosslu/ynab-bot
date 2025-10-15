@@ -139,9 +139,26 @@ async function handleMenuSelection(userId, selection) {
             state.currentMenu = option.next_menu;
             state.level = nextMenu.level;
             state.menuPath.push(option.next_menu);
+
+            // Actualizar estado según el tipo de menú
+            if (nextMenu.state_type) {
+                state.state = nextMenu.state_type;
+            } else {
+                state.state = 'menu';
+            }
+
             userMenuState.set(userId, state);
 
-            return { response: renderMenu(option.next_menu), stayInMenu: true };
+            // Si tiene opciones, renderizar menú normal
+            if (nextMenu.options) {
+                return { response: renderMenu(option.next_menu), stayInMenu: true };
+            }
+
+            // Si no tiene opciones (waiting_document), mostrar descripción
+            return {
+                response: `${nextMenu.title}\n\n${nextMenu.description}`,
+                stayInMenu: true
+            };
 
         case 'execute_claude':
             // Ejecutar función con Claude y volver
@@ -1479,8 +1496,9 @@ whatsappClient.on('message', async (msg) => {
             return;
         }
 
-        if (msg.body.toLowerCase() === '/menu') {
+        if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done') {
             // Volver al menú principal
+            conversations.delete(msg.from);
             initializeUserMenuState(msg.from);
             const welcomeMsg = renderMenu('main');
             await msg.reply(addStatusFooter(welcomeMsg, msg.from));
@@ -1684,9 +1702,15 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
             }
         }
 
-        // Modo conversacional o procesamiento de PDF/imagen
-        if (menuState.state === 'conversation' || imageData || pdfText) {
+        // Modo conversacional, waiting_document, o procesamiento de PDF/imagen
+        if (menuState.state === 'conversation' || menuState.state === 'waiting_document' || imageData || pdfText) {
             let history = conversations.get(msg.from) || [];
+
+            // Si recibimos PDF/imagen en waiting_document, cambiar a modo conversación
+            if ((imageData || pdfText) && menuState.state === 'waiting_document') {
+                menuState.state = 'conversation';
+                userMenuState.set(msg.from, menuState);
+            }
 
             // Procesar con Claude
             const response = await askClaude(msg.body, history, msg.from, imageData, pdfText);
