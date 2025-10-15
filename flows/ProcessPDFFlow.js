@@ -387,7 +387,9 @@ ${pdfText.substring(0, 8000)}`;
         });
 
         message += `\n💡 Total: ${extractedTransactions.length} transacciones\n\n`;
-        message += `¿Crear estas transacciones? (sí/no)`;
+        message += `¿Crear estas transacciones? (sí/no)\n`;
+        message += `\n💡 Tip: Puedes corregir montos antes de confirmar.\n`;
+        message += `Ejemplo: "1 es 146.16" o "1 es 146.16, 4 es 0.00"`;
 
         return message;
     }
@@ -403,12 +405,29 @@ ${pdfText.substring(0, 8000)}`;
             return '❌ Creación de transacciones cancelada.';
         }
 
-        if (normalized !== 'sí' && normalized !== 'si' && normalized !== 'yes') {
-            return '¿Crear transacciones? Escribe "sí" o "no".';
+        if (normalized === 'sí' || normalized === 'si' || normalized === 'yes') {
+            // Create transactions
+            return await this._createTransactions();
         }
 
-        // Create transactions
-        return await this._createTransactions();
+        // Try to parse corrections (e.g., "1 es 146.16, 4 es 0.00")
+        const corrections = this._parseCorrections(message);
+
+        if (corrections.length > 0) {
+            // Apply corrections and show updated list
+            return await this._applyCorrections(corrections);
+        }
+
+        // Not a valid response
+        return `❓ No entendí tu respuesta.
+
+💡 Puedes:
+- Escribir *sí* para crear las transacciones
+- Escribir *no* para cancelar
+- Corregir montos: Ej: "1 es 146.16" o "1 es 146.16, 4 es 0.00"
+- Escribir *editar N* para cambiar la transacción N
+
+¿Qué deseas hacer?`;
     }
 
     /**
@@ -475,6 +494,94 @@ ${pdfText.substring(0, 8000)}`;
     }
 
     /**
+     * Parse correction messages
+     * Supports formats:
+     * - "1 es 146.16" (single correction)
+     * - "1 es 146.16, 4 es 0.00" (multiple corrections)
+     * - "editar 1" (edit transaction 1)
+     */
+    _parseCorrections(message) {
+        const corrections = [];
+
+        // Pattern: "N es AMOUNT" or "N: AMOUNT"
+        // Examples: "1 es 146.16", "4 es 0.00", "1: 146.16"
+        const correctionPattern = /(\d+)\s*(?:es|:)\s*(-?\d+(?:\.\d{1,2})?)/gi;
+        let match;
+
+        while ((match = correctionPattern.exec(message)) !== null) {
+            const index = parseInt(match[1]) - 1; // Convert to 0-indexed
+            const amount = parseFloat(match[2]);
+
+            if (!isNaN(index) && !isNaN(amount)) {
+                corrections.push({ index, amount });
+            }
+        }
+
+        return corrections;
+    }
+
+    /**
+     * Apply corrections to extracted transactions
+     */
+    async _applyCorrections(corrections) {
+        const { extractedTransactions } = this.state.data;
+        const changes = [];
+
+        for (const correction of corrections) {
+            const { index, amount } = correction;
+
+            // Validate index
+            if (index < 0 || index >= extractedTransactions.length) {
+                return `❌ Transacción ${index + 1} no existe. Solo hay ${extractedTransactions.length} transacciones.`;
+            }
+
+            // Store old amount for reporting
+            const oldAmount = extractedTransactions[index].amount;
+
+            // Apply correction
+            extractedTransactions[index].amount = amount;
+
+            changes.push({
+                index: index + 1, // 1-indexed for display
+                payee: extractedTransactions[index].payee,
+                oldAmount,
+                newAmount: amount
+            });
+
+            console.log(`✏️ Corrected transaction ${index + 1}: ${oldAmount} → ${amount}`);
+        }
+
+        // Show updated list with changes highlighted
+        let message = `✅ *Correcciones aplicadas:*\n\n`;
+
+        changes.forEach(change => {
+            message += `${change.index}. ${change.payee}\n`;
+            message += `   Antes: ${change.oldAmount < 0 ? '' : '+'}${change.oldAmount}\n`;
+            message += `   Ahora: ${change.newAmount < 0 ? '' : '+'}${change.newAmount}\n\n`;
+        });
+
+        message += `📋 *Lista actualizada:*\n\n`;
+
+        // Show ALL transactions with changes highlighted
+        extractedTransactions.forEach((tx, index) => {
+            const amountStr = tx.amount < 0 ? `${tx.amount}` : `+${tx.amount}`;
+            const isChanged = changes.some(c => c.index === index + 1);
+            const marker = isChanged ? '✏️' : '  ';
+
+            message += `${marker} ${index + 1}. ${tx.date} | ${tx.payee} | ${amountStr}\n`;
+            if (tx.categoryName) {
+                message += `     📁 ${tx.categoryName}\n`;
+            }
+        });
+
+        message += `\n💡 Total: ${extractedTransactions.length} transacciones\n\n`;
+        message += `¿Crear estas transacciones? (sí/no)\n`;
+        message += `O puedes hacer más correcciones.`;
+
+        return message;
+    }
+
+    /**
      * Get help for this flow
      */
     getHelp() {
@@ -482,11 +589,17 @@ ${pdfText.substring(0, 8000)}`;
 
 Este flujo extrae transacciones de estados de cuenta (PDF o imagen).
 
+*Pasos:*
 1. Envía el PDF o imagen
 2. Selecciona el presupuesto
 3. Revisa las transacciones extraídas
 4. Selecciona la cuenta
-5. Confirma la creación
+5. Confirma o corrige las transacciones
+6. Confirma la creación
+
+*Corregir transacciones:*
+- "1 es 146.16" - Corrige el monto de la transacción 1
+- "1 es 146.16, 4 es 0.00" - Corrige múltiples transacciones
 
 Escribe "cancelar" para salir.`;
     }
