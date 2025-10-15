@@ -123,6 +123,15 @@ class YnabService {
      */
     async createTransaction(budgetId, accountId, amount, payee, categoryId, memo, date = null) {
         try {
+            console.log(`\n🔧 DEBUG: ynabService.createTransaction() called`);
+            console.log(`   INPUT budgetId: ${budgetId}`);
+            console.log(`   INPUT accountId: ${accountId}`);
+            console.log(`   INPUT amount: ${amount} (type: ${typeof amount})`);
+            console.log(`   INPUT payee: ${payee}`);
+            console.log(`   INPUT categoryId: ${categoryId}`);
+            console.log(`   INPUT memo: ${memo}`);
+            console.log(`   INPUT date: ${date}`);
+
             const transactionData = {
                 account_id: accountId,
                 date: date || new Date().toISOString().split('T')[0],
@@ -137,8 +146,14 @@ class YnabService {
                 transactionData.category_id = categoryId;
             }
 
+            console.log(`   BUILT transactionData:`, JSON.stringify(transactionData, null, 2));
+
+            const url = `${this.baseUrl}/budgets/${budgetId}/transactions`;
+            console.log(`   API URL: ${url}`);
+
+            console.log(`   🚀 Sending POST request to YNAB...`);
             const response = await axios.post(
-                `${this.baseUrl}/budgets/${budgetId}/transactions`,
+                url,
                 {
                     transaction: transactionData
                 },
@@ -147,9 +162,18 @@ class YnabService {
                 }
             );
 
+            console.log(`   ✅ YNAB API Response status: ${response.status}`);
+            console.log(`   ✅ Transaction created:`, JSON.stringify(response.data.data.transaction, null, 2));
+
             return response.data.data.transaction;
         } catch (error) {
-            console.error('Error creando transacción:', error.message);
+            console.error(`\n❌ ERROR in ynabService.createTransaction:`);
+            console.error(`   Error message: ${error.message}`);
+            if (error.response) {
+                console.error(`   HTTP Status: ${error.response.status}`);
+                console.error(`   Response data:`, JSON.stringify(error.response.data, null, 2));
+            }
+            console.error(`   Error stack:`, error.stack);
             throw error;
         }
     }

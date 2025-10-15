@@ -375,15 +375,32 @@ class BaseDocumentFlow extends BaseFlow {
         try {
             const { budgetId, accountId, extractedTransactions } = this.state.data;
 
-            console.log(`📝 Creating ${extractedTransactions.length} transactions...`);
+            console.log(`\n========================================`);
+            console.log(`🔧 DEBUG: _createTransactions() CALLED`);
+            console.log(`========================================`);
+            console.log(`📊 Budget ID: ${budgetId}`);
+            console.log(`📊 Account ID: ${accountId}`);
+            console.log(`📊 Budget Name: ${this.state.data.budgetName}`);
+            console.log(`📊 Account Name: ${this.state.data.accountName}`);
+            console.log(`📊 Transactions to create: ${extractedTransactions.length}`);
+            console.log(`📊 First transaction:`, JSON.stringify(extractedTransactions[0], null, 2));
 
             let created = 0;
             let failed = 0;
 
             // Get categories for mapping
+            console.log(`🔧 DEBUG: Fetching categories for budget ${budgetId}...`);
             const categories = await ynabService.getCategories(budgetId);
+            console.log(`✅ Categories fetched: ${categories.length} categories`);
 
-            for (const tx of extractedTransactions) {
+            for (let i = 0; i < extractedTransactions.length; i++) {
+                const tx = extractedTransactions[i];
+                console.log(`\n--- Transaction ${i + 1}/${extractedTransactions.length} ---`);
+                console.log(`📝 Payee: ${tx.payee}`);
+                console.log(`💰 Amount: ${tx.amount}`);
+                console.log(`📅 Date: ${tx.date}`);
+                console.log(`📁 CategoryName: ${tx.categoryName || 'none'}`);
+
                 try {
                     // Find category by name if specified
                     let categoryId = null;
@@ -391,12 +408,24 @@ class BaseDocumentFlow extends BaseFlow {
                         const category = ynabService.findCategoryByName(categories, tx.categoryName);
                         if (category) {
                             categoryId = category.id;
+                            console.log(`✅ Category found: ${category.name} (ID: ${categoryId})`);
+                        } else {
+                            console.log(`⚠️ Category not found: ${tx.categoryName}`);
                         }
                     }
 
+                    console.log(`🔧 DEBUG: Calling ynabService.createTransaction with:`);
+                    console.log(`   budgetId: ${budgetId}`);
+                    console.log(`   accountId: ${accountId}`);
+                    console.log(`   amount: ${tx.amount}`);
+                    console.log(`   payee: ${tx.payee}`);
+                    console.log(`   categoryId: ${categoryId}`);
+                    console.log(`   memo: ${tx.memo || null}`);
+                    console.log(`   date: ${tx.date}`);
+
                     // CRITICAL: Do NOT multiply by 1000 here!
                     // ynabService.createTransaction already does this conversion
-                    await ynabService.createTransaction(
+                    const result = await ynabService.createTransaction(
                         budgetId,
                         accountId,
                         tx.amount,           // Pass amount as-is (NOT multiplied)
@@ -406,12 +435,22 @@ class BaseDocumentFlow extends BaseFlow {
                         tx.date              // Pass the transaction date
                     );
 
+                    console.log(`✅ Transaction created successfully:`, result);
                     created++;
                 } catch (error) {
-                    console.error(`Error creating transaction: ${tx.payee}`, error);
+                    console.error(`❌ ERROR creating transaction ${i + 1}: ${tx.payee}`);
+                    console.error(`❌ Error message: ${error.message}`);
+                    console.error(`❌ Error stack:`, error.stack);
                     failed++;
                 }
             }
+
+            console.log(`\n========================================`);
+            console.log(`📊 FINAL RESULTS:`);
+            console.log(`✅ Created: ${created}`);
+            console.log(`❌ Failed: ${failed}`);
+            console.log(`📊 Total: ${extractedTransactions.length}`);
+            console.log(`========================================\n`);
 
             this.state.step = 'complete';
 
@@ -424,7 +463,9 @@ class BaseDocumentFlow extends BaseFlow {
 
             return message;
         } catch (error) {
-            console.error('Error creating transactions:', error);
+            console.error(`\n❌ CRITICAL ERROR in _createTransactions:`);
+            console.error(`❌ Error message: ${error.message}`);
+            console.error(`❌ Error stack:`, error.stack);
             this.state.step = 'complete';
             return `❌ Error creando transacciones: ${error.message}`;
         }
