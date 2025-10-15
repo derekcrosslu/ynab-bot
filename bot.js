@@ -4,6 +4,8 @@ const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 const fs = require('fs');
 const pdf = require('pdf-parse');
+const messageQueue = require('./message-queue');
+const analytics = require('./analytics');
 require('dotenv').config();
 
 // Configurar Claude
@@ -715,6 +717,9 @@ async function executeToolCall(toolName, toolInput, userId = 'default') {
     }
 
     debugStats.set(userId, userStats);
+
+    // Track tool use in analytics
+    analytics.trackEvent(userId, 'tool_use', { toolName, input: toolInput });
 
     try {
         switch(toolName) {
@@ -1507,16 +1512,18 @@ const pdfTextCache = new Map();
 const debugStats = new Map();
 
 whatsappClient.on('message', async (msg) => {
-    console.log('========================================');
-    console.log('📨 MENSAJE RECIBIDO:');
-    console.log('De:', msg.from);
-    console.log('Cuerpo:', msg.body);
-    console.log('Tipo:', msg.type);
-    console.log('Es de grupo?', msg.from.includes('@g.us'));
-    console.log('Es estado?', msg.from.includes('status'));
-    console.log('========================================');
-    
-    try {
+    // ⚡ QUEUE MESSAGE: Prevent race conditions by queuing messages per user
+    await messageQueue.enqueue(msg.from, async () => {
+        console.log('========================================');
+        console.log('📨 MENSAJE RECIBIDO:');
+        console.log('De:', msg.from);
+        console.log('Cuerpo:', msg.body);
+        console.log('Tipo:', msg.type);
+        console.log('Es de grupo?', msg.from.includes('@g.us'));
+        console.log('Es estado?', msg.from.includes('status'));
+        console.log('========================================');
+
+        try {
         // Ignorar mensajes de grupos y de estados
         if (msg.from.includes('@g.us') || msg.from.includes('status')) {
             console.log('⏭️  Mensaje ignorado (grupo o estado)');
@@ -1525,6 +1532,13 @@ whatsappClient.on('message', async (msg) => {
 
         console.log(`📩 Procesando mensaje de ${msg.from}: ${msg.body}`);
 
+        // Track message received
+        analytics.trackEvent(msg.from, 'message_received', {
+            body: msg.body,
+            type: msg.type,
+            hasMedia: msg.hasMedia
+        });
+
         // Obtener o inicializar estado de menú
         const menuState = getUserMenuState(msg.from);
 
@@ -1532,7 +1546,8 @@ whatsappClient.on('message', async (msg) => {
         if (msg.body.toLowerCase() === '/reset') {
             conversations.delete(msg.from);
             initializeUserMenuState(msg.from);
-            console.log(`🔄 Historial y menú reiniciados para ${msg.from}`);
+            messageQueue.clearQueue(msg.from); // Limpiar cola de mensajes
+            console.log(`🔄 Historial, menú y cola reiniciados para ${msg.from}`);
             const welcomeMsg = renderMenu('main');
             await msg.reply(addStatusFooter(welcomeMsg, msg.from));
             return;
@@ -1540,6 +1555,10 @@ whatsappClient.on('message', async (msg) => {
 
         if (msg.body.toLowerCase() === '/menu' || msg.body.toLowerCase() === '/done') {
             // Volver al menú principal
+            // End current flow if in conversation
+            if (menuState.state === 'conversation') {
+                analytics.endFlow(msg.from, 'manual_exit', true);
+            }
             conversations.delete(msg.from);
             initializeUserMenuState(msg.from);
             const welcomeMsg = renderMenu('main');
@@ -1612,6 +1631,20 @@ whatsappClient.on('message', async (msg) => {
             debugMessage += `🖥️ *Memoria (MB):*\n`;
             debugMessage += `- RSS: ${Math.round(memUsage.rss / 1024 / 1024)}MB\n`;
             debugMessage += `- Heap: ${Math.round(memUsage.heapUsed / 1024 / 1024)}/${Math.round(memUsage.heapTotal / 1024 / 1024)}MB\n\n`;
+
+            // Message queue stats
+            debugMessage += `⚡ *Cola de Mensajes:*\n`;
+            debugMessage += `- Mensajes pendientes: ${messageQueue.getQueueLength(msg.from)}\n`;
+            debugMessage += `- Procesando: ${messageQueue.isProcessing(msg.from) ? 'Sí' : 'No'}\n\n`;
+
+            // Analytics stats
+            const analyticsData = analytics.getUserAnalytics(msg.from);
+            if (analyticsData) {
+                debugMessage += `📈 *Analytics:*\n`;
+                debugMessage += `- Total eventos: ${analyticsData.totalEvents}\n`;
+                debugMessage += `- Mensajes: ${analyticsData.session.messageCount}\n`;
+                debugMessage += `- Tool calls: ${analyticsData.session.toolCalls}\n\n`;
+            }
 
                 debugMessage += `💡 Usa /reset para limpiar historial`;
 
@@ -1740,6 +1773,8 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
 
             if (menuResult.action === 'enter_conversation') {
                 // Entrar en modo conversacional
+                analytics.startFlow(msg.from, menuResult.function);
+
                 const conversationPrompt = await executeClaudeFunction(
                     menuResult.function,
                     menuResult.params,
@@ -1787,10 +1822,15 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
         const welcomeMsg = renderMenu('main');
         await msg.reply(addStatusFooter(welcomeMsg, msg.from));
 
-    } catch (error) {
-        console.error('Error procesando mensaje:', error);
-        await msg.reply('❌ Hubo un error. Intenta de nuevo o escribe /reset');
-    }
+        } catch (error) {
+            console.error('Error procesando mensaje:', error);
+            analytics.trackError(msg.from, 'message_processing_error', error, {
+                body: msg.body,
+                state: menuState?.state
+            });
+            await msg.reply('❌ Hubo un error. Intenta de nuevo o escribe /reset');
+        }
+    }); // Fin de messageQueue.enqueue
 });
 
 whatsappClient.on('disconnected', (reason) => {
