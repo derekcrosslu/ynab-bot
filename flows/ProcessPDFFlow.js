@@ -269,17 +269,14 @@ ${this.state.data.pdfText}`;
 
         let message = `📋 *Transacciones a crear en ${accountName}:*\n\n`;
 
-        extractedTransactions.slice(0, 10).forEach((tx, index) => {
+        // Show ALL transactions so user can validate them
+        extractedTransactions.forEach((tx, index) => {
             const amountStr = tx.amount < 0 ? `${tx.amount}` : `+${tx.amount}`;
             message += `${index + 1}. ${tx.date} | ${tx.payee} | ${amountStr}\n`;
             if (tx.categoryName) {
                 message += `   📁 ${tx.categoryName}\n`;
             }
         });
-
-        if (extractedTransactions.length > 10) {
-            message += `\n... y ${extractedTransactions.length - 10} más.\n`;
-        }
 
         message += `\n💡 Total: ${extractedTransactions.length} transacciones\n\n`;
         message += `¿Crear estas transacciones? (sí/no)`;
@@ -332,16 +329,17 @@ ${this.state.data.pdfText}`;
                         }
                     }
 
-                    // Convert amount to milliunits (YNAB uses milliunits)
-                    const amountMilliunits = Math.round(tx.amount * 1000);
-
+                    // CRITICAL FIX: Do NOT multiply by 1000 here!
+                    // ynabService.createTransaction already does this conversion (line 129)
+                    // Passing the amount directly prevents double conversion bug
                     await ynabService.createTransaction(
                         budgetId,
                         accountId,
-                        amountMilliunits,
+                        tx.amount,           // Pass amount as-is (NOT multiplied)
                         tx.payee,
                         categoryId,
-                        tx.memo || null
+                        tx.memo || null,
+                        tx.date              // CRITICAL FIX: Pass the transaction date
                     );
 
                     created++;
