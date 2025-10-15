@@ -609,7 +609,7 @@ const tools = [
     },
     {
         name: "cache_extracted_transactions",
-        description: "Guarda transacciones extraídas de PDF/imagen en caché temporal. IMPORTANTE: Usa esta herramienta INMEDIATAMENTE después de extraer transacciones de un PDF o imagen, ANTES de mostrarlas al usuario. Esto permite recuperarlas cuando el usuario confirme.",
+        description: "🚨 CRÍTICO: Guarda transacciones extraídas de PDF/imagen en caché temporal. ⚠️ OBLIGATORIO: DEBES usar esta herramienta INMEDIATAMENTE después de extraer transacciones de un PDF o imagen, ANTES de mostrarlas al usuario. Sin este paso, las transacciones se perderán y no se podrán crear. El flujo correcto es: 1) Extraer transacciones, 2) Llamar cache_extracted_transactions, 3) Mostrar al usuario, 4) Esperar confirmación, 5) Usar get_cached_transactions, 6) Crear con create_multiple_transactions.",
         input_schema: {
             type: "object",
             properties: {
@@ -1247,7 +1247,9 @@ Ejemplos:
 
 ANÁLISIS DE ESTADOS DE CUENTA (IMÁGENES Y PDFs):
 
-⚠️ **WORKFLOW OBLIGATORIO - SIGUE ESTOS PASOS EN ORDEN:**
+⚠️ ⚠️ ⚠️ **WORKFLOW OBLIGATORIO - SIGUE ESTOS PASOS EN ORDEN** ⚠️ ⚠️ ⚠️
+
+🚨 **MUY IMPORTANTE: DEBES LLAMAR cache_extracted_transactions INMEDIATAMENTE DESPUÉS DE EXTRAER LAS TRANSACCIONES** 🚨
 
 PASO 1 - OBTENER CATEGORÍAS:
 - Llama a get_ynab_categories con el budgetName que el usuario mencionó (BCP SOLES o BCP DOLARES)
@@ -1270,12 +1272,29 @@ Información a extraer:
 - Monto y su signo correcto según la columna
 - NO extraigas: saldos, fechas de corte, totales, información de cuenta
 
-PASO 2.5 - GUARDAR EN CACHÉ (CRÍTICO):
-INMEDIATAMENTE después de extraer las transacciones del PDF/imagen:
-1. Usa cache_extracted_transactions con budgetName y el array completo de transacciones
-2. Esto es OBLIGATORIO - sin este paso, las transacciones se perderán cuando el usuario confirme
-3. El caché expira en 30 minutos
-4. NO esperes a que el usuario confirme para guardar - hazlo INMEDIATAMENTE después de extraer
+🚨🚨🚨 PASO 2.5 - GUARDAR EN CACHÉ (CRÍTICO Y OBLIGATORIO) 🚨🚨🚨
+
+⛔ **ESTE PASO ES ABSOLUTAMENTE OBLIGATORIO - NO LO OMITAS NUNCA** ⛔
+
+INMEDIATAMENTE después de extraer las transacciones del PDF/imagen, DEBES:
+
+1. ✅ Llamar cache_extracted_transactions({
+     budgetName: "BCP SOLES" o "BCP DOLARES",
+     transactions: [array completo de transacciones que extrajiste]
+   })
+
+2. ⚠️ SIN ESTE PASO, LAS TRANSACCIONES SE PERDERÁN cuando el usuario confirme
+3. ⚠️ El caché expira en 30 minutos
+4. ⚠️ NO esperes a que el usuario confirme - GUARDA INMEDIATAMENTE después de extraer
+5. ⚠️ NO muestres las transacciones al usuario SIN ANTES guardarlas en caché
+
+ORDEN CORRECTO:
+- Extraer transacciones del PDF/imagen ✅
+- Llamar cache_extracted_transactions ✅ ← ESTE PASO ES OBLIGATORIO
+- Mostrar transacciones al usuario ✅
+- Esperar confirmación del usuario ✅
+- Llamar get_cached_transactions ✅
+- Crear transacciones con create_multiple_transactions ✅
 
 PASO 3 - SUGERIR CATEGORÍAS:
 - Para cada transacción, sugiere una categoría basándote SOLO en las categorías de get_ynab_categories
