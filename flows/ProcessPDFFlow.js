@@ -145,33 +145,41 @@ Escribe el número o nombre del presupuesto.`;
 
             const categories = await ynabService.getCategories(budgetId);
 
-            // Build extraction prompt
+            // Build extraction prompt with better JSON instructions
             const extractionPrompt = `Analiza el siguiente texto de estado de cuenta BCP y extrae TODAS las transacciones.
 
-IMPORTANTE:
+REGLAS CRÍTICAS PARA JSON:
+1. Responde ÚNICAMENTE con JSON válido
+2. NO uses markdown (no \`\`\`json)
+3. Escapa comillas dobles en strings con \\\"
+4. NO incluyas explicaciones antes o después del JSON
+5. Si no hay transacciones, devuelve {"transactions": []}
+
+REGLAS DE EXTRACCIÓN:
 - Columna CARGOS/DEBE: montos NEGATIVOS (ej: -480.00)
 - Columna ABONOS/HABER: montos POSITIVOS (ej: +1.50)
-- Fechas DDMMM: Convierte a YYYY-MM-DD (año actual si no se especifica)
-- Ignora encabezados, totales, y líneas no-transaccionales
+- Fechas DDMMM: Convierte a YYYY-MM-DD (usa 2025 como año)
+- Ignora encabezados, totales, saldos y líneas no-transaccionales
+- Limpia el payee (sin caracteres especiales innecesarios)
 
-CATEGORÍAS DISPONIBLES:
-${categories.map(c => `- ${c.name}`).slice(0, 20).join('\n')}
+CATEGORÍAS DISPONIBLES (solo usa estas):
+${categories.map(c => c.name).slice(0, 15).join(', ')}
 
-Responde SOLO con un JSON válido (sin markdown):
+FORMATO DE RESPUESTA (SOLO JSON, sin texto adicional):
 {
   "transactions": [
     {
-      "date": "YYYY-MM-DD",
-      "amount": -480.00,
-      "payee": "Nombre del comercio",
-      "categoryName": "Categoría sugerida (de la lista)",
-      "memo": "Nota adicional (opcional)"
+      "date": "2025-01-15",
+      "amount": -150.00,
+      "payee": "Nombre comercio",
+      "categoryName": "Categoria exacta de la lista",
+      "memo": ""
     }
   ]
 }
 
 TEXTO DEL PDF:
-${this.state.data.pdfText}`;
+${this.state.data.pdfText.substring(0, 8000)}`;
 
             // Call Claude DIRECTLY (not via tool)
             const client = this.anthropicClient || anthropicClient;
@@ -181,25 +189,90 @@ ${this.state.data.pdfText}`;
 
             const response = await client.messages.create({
                 model: 'claude-sonnet-4-20250514',
-                max_tokens: 4096,
+                max_tokens: 8192,  // Increased for large PDFs
                 messages: [{ role: 'user', content: extractionPrompt }]
             });
 
             const responseText = response.content.find(c => c.type === 'text')?.text || '{}';
+            console.log(`📄 Raw Claude response length: ${responseText.length} chars`);
 
-            // Parse JSON response (handle markdown code blocks)
+            // Robust JSON parsing with multiple fallbacks
             let jsonText = responseText.trim();
+
+            // Remove markdown code blocks if present
             if (jsonText.startsWith('```')) {
                 jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
             }
 
-            const extracted = JSON.parse(jsonText);
+            // Try to extract JSON if there's text before/after
+            const jsonMatch = jsonText.match(/\{[\s\S]*"transactions"[\s\S]*\}/);
+            if (jsonMatch) {
+                jsonText = jsonMatch[0];
+            }
+
+            // Log first 500 chars for debugging
+            console.log(`📄 JSON to parse (first 500): ${jsonText.substring(0, 500)}`);
+
+            let extracted;
+            try {
+                extracted = JSON.parse(jsonText);
+            } catch (parseError) {
+                console.error(`❌ JSON parse error: ${parseError.message}`);
+                console.error(`❌ Failed JSON (first 1000 chars): ${jsonText.substring(0, 1000)}`);
+
+                // Try to fix common issues
+                try {
+                    // Fix unescaped quotes in strings (basic attempt)
+                    const fixedJson = jsonText
+                        .replace(/([^\\])"([^"]*)":/g, '$1\\"$2":')  // Fix keys
+                        .replace(/: "([^"]*)"([^,}\]])/g, ': "$1\\"$2');  // Fix values
+
+                    extracted = JSON.parse(fixedJson);
+                    console.log('✅ JSON fixed and parsed successfully');
+                } catch (fixError) {
+                    throw new Error(`No se pudo parsear la respuesta de Claude. Por favor intenta de nuevo con otro PDF o contacta soporte.`);
+                }
+            }
+
             const transactions = extracted.transactions || [];
 
-            // AUTO-CACHE the transactions
-            this.state.data.extractedTransactions = transactions;
+            if (!Array.isArray(transactions)) {
+                throw new Error('Formato de respuesta inválido: transactions debe ser un array');
+            }
 
-            console.log(`💾 Extracted and cached ${transactions.length} transactions`);
+            // Validate and clean transactions
+            const validTransactions = transactions.filter(tx => {
+                // Must have required fields
+                if (!tx.date || !tx.amount || !tx.payee) {
+                    console.warn(`⚠️ Skipping invalid transaction: ${JSON.stringify(tx)}`);
+                    return false;
+                }
+
+                // Validate date format (YYYY-MM-DD)
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(tx.date)) {
+                    console.warn(`⚠️ Invalid date format: ${tx.date} for ${tx.payee}`);
+                    return false;
+                }
+
+                // Validate amount is a number
+                if (typeof tx.amount !== 'number' || isNaN(tx.amount)) {
+                    console.warn(`⚠️ Invalid amount: ${tx.amount} for ${tx.payee}`);
+                    return false;
+                }
+
+                return true;
+            });
+
+            console.log(`✅ Validated ${validTransactions.length}/${transactions.length} transactions`);
+
+            if (validTransactions.length === 0) {
+                throw new Error('No se encontraron transacciones válidas en el PDF');
+            }
+
+            // AUTO-CACHE the validated transactions
+            this.state.data.extractedTransactions = validTransactions;
+
+            console.log(`💾 Extracted and cached ${validTransactions.length} transactions`);
 
             // Now ask user to select account
             return await this._askForAccount();
