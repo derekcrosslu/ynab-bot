@@ -238,8 +238,9 @@ class BaseDocumentFlow extends BaseFlow {
 
         message += `\n💡 Total: ${extractedTransactions.length} transacciones\n\n`;
         message += `¿Crear estas transacciones? (sí/no)\n`;
-        message += `\n💡 Tip: Puedes corregir montos antes de confirmar.\n`;
-        message += `Ejemplo: "1 es 146.16" o "1 es 146.16, 4 es 0.00"`;
+        message += `\n💡 Tip: Puedes corregir antes de confirmar:\n`;
+        message += `• Montos: "1 es 146.16" o "1 es 146.16, 4 es 0.00"\n`;
+        message += `• Categorías: "1 es Groceries" o "2 es Bank Fees"`;
 
         return message;
     }
@@ -274,8 +275,9 @@ class BaseDocumentFlow extends BaseFlow {
 💡 Puedes:
 - Escribir *sí* para crear las transacciones
 - Escribir *no* para cancelar
-- Corregir montos: Ej: "1 es 146.16" o "1 es 146.16, 4 es 0.00"
-- Escribir *editar N* para cambiar la transacción N
+- Corregir montos: "1 es 146.16" o "1 es 146.16, 4 es 0.00"
+- Corregir categorías: "1 es Groceries" o "2 es Bank Fees"
+- Combinar: "1 es 146.16, 2 es Groceries, 4 es 0.00"
 
 ¿Qué deseas hacer?`;
     }
@@ -283,27 +285,53 @@ class BaseDocumentFlow extends BaseFlow {
     /**
      * Parse correction messages
      * Supports formats:
-     * - "1 es 146.16" (single correction)
-     * - "1 es 146.16, 4 es 0.00" (multiple corrections)
-     * - "editar 1" (edit transaction 1)
+     * - Amount: "1 es 146.16" or "1: 146.16"
+     * - Category: "1 es Groceries" or "1 categoria Groceries" or '1 es "Groceries"'
+     * - Multiple: "1 es 146.16, 2 es Groceries, 4 es 0.00"
      */
     _parseCorrections(message) {
         const corrections = [];
 
-        // Pattern: "N es AMOUNT" or "N: AMOUNT"
-        // Examples: "1 es 146.16", "4 es 0.00", "1: 146.16"
-        const correctionPattern = /(\d+)\s*(?:es|:)\s*(-?\d+(?:\.\d{1,2})?)/gi;
-        let match;
+        console.log(`🔧 Parsing corrections from: "${message}"`);
 
-        while ((match = correctionPattern.exec(message)) !== null) {
-            const index = parseInt(match[1]) - 1; // Convert to 0-indexed
-            const amount = parseFloat(match[2]);
+        // Split by comma to handle multiple corrections
+        const parts = message.split(',').map(p => p.trim());
 
-            if (!isNaN(index) && !isNaN(amount)) {
-                corrections.push({ index, amount });
+        for (const part of parts) {
+            // Try to match: "N es VALUE" or "N: VALUE" or "N categoria VALUE"
+            const match = part.match(/^(\d+)\s*(?:es|:|categoria|category)\s+(.+)$/i);
+
+            if (match) {
+                const index = parseInt(match[1]) - 1; // Convert to 0-indexed
+                let value = match[2].trim();
+
+                // Remove quotes if present
+                value = value.replace(/^["']|["']$/g, '');
+
+                // Try to parse as number (for amount corrections)
+                const numericValue = parseFloat(value);
+
+                if (!isNaN(numericValue) && /^-?\d+(\.\d{1,2})?$/.test(value)) {
+                    // It's a number - amount correction
+                    console.log(`   ✅ Amount correction: #${index + 1} → ${numericValue}`);
+                    corrections.push({
+                        index,
+                        type: 'amount',
+                        amount: numericValue
+                    });
+                } else {
+                    // It's text - category correction
+                    console.log(`   ✅ Category correction: #${index + 1} → "${value}"`);
+                    corrections.push({
+                        index,
+                        type: 'category',
+                        categoryName: value
+                    });
+                }
             }
         }
 
+        console.log(`   📊 Total corrections parsed: ${corrections.length}`);
         return corrections;
     }
 
@@ -314,28 +342,47 @@ class BaseDocumentFlow extends BaseFlow {
         const { extractedTransactions } = this.state.data;
         const changes = [];
 
+        console.log(`🔧 Applying ${corrections.length} corrections...`);
+
         for (const correction of corrections) {
-            const { index, amount } = correction;
+            const { index, type } = correction;
 
             // Validate index
             if (index < 0 || index >= extractedTransactions.length) {
                 return `❌ Transacción ${index + 1} no existe. Solo hay ${extractedTransactions.length} transacciones.`;
             }
 
-            // Store old amount for reporting
-            const oldAmount = extractedTransactions[index].amount;
-
-            // Apply correction
-            extractedTransactions[index].amount = amount;
-
-            changes.push({
+            const change = {
                 index: index + 1, // 1-indexed for display
                 payee: extractedTransactions[index].payee,
-                oldAmount,
-                newAmount: amount
-            });
+                type: type
+            };
 
-            console.log(`✏️ Corrected transaction ${index + 1}: ${oldAmount} → ${amount}`);
+            if (type === 'amount') {
+                // Amount correction
+                const oldAmount = extractedTransactions[index].amount;
+                const newAmount = correction.amount;
+
+                extractedTransactions[index].amount = newAmount;
+
+                change.oldAmount = oldAmount;
+                change.newAmount = newAmount;
+
+                console.log(`✏️ Amount corrected - Transaction ${index + 1}: ${oldAmount} → ${newAmount}`);
+            } else if (type === 'category') {
+                // Category correction
+                const oldCategory = extractedTransactions[index].categoryName || 'Sin categoría';
+                const newCategory = correction.categoryName;
+
+                extractedTransactions[index].categoryName = newCategory;
+
+                change.oldCategory = oldCategory;
+                change.newCategory = newCategory;
+
+                console.log(`✏️ Category corrected - Transaction ${index + 1}: "${oldCategory}" → "${newCategory}"`);
+            }
+
+            changes.push(change);
         }
 
         // Show updated list with changes highlighted
@@ -343,8 +390,14 @@ class BaseDocumentFlow extends BaseFlow {
 
         changes.forEach(change => {
             message += `${change.index}. ${change.payee}\n`;
-            message += `   Antes: ${change.oldAmount < 0 ? '' : '+'}${change.oldAmount}\n`;
-            message += `   Ahora: ${change.newAmount < 0 ? '' : '+'}${change.newAmount}\n\n`;
+
+            if (change.type === 'amount') {
+                message += `   💰 Monto - Antes: ${change.oldAmount < 0 ? '' : '+'}${change.oldAmount}\n`;
+                message += `   💰 Monto - Ahora: ${change.newAmount < 0 ? '' : '+'}${change.newAmount}\n\n`;
+            } else if (change.type === 'category') {
+                message += `   📁 Categoría - Antes: ${change.oldCategory}\n`;
+                message += `   📁 Categoría - Ahora: ${change.newCategory}\n\n`;
+            }
         });
 
         message += `📋 *Lista actualizada:*\n\n`;

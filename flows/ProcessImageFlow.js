@@ -132,8 +132,9 @@ Este flujo extrae transacciones de estados de cuenta en imagen.
 6. Confirma la creación
 
 *Corregir transacciones:*
-- "1 es 146.16" - Corrige el monto de la transacción 1
-- "1 es 146.16, 4 es 0.00" - Corrige múltiples transacciones
+• Montos: "1 es 146.16" o "1 es 146.16, 4 es 0.00"
+• Categorías: "1 es Groceries" o "2 es Bank Fees"
+• Combinar: "1 es 146.16, 2 es Groceries, 4 es 0.00"
 
 Escribe "cancelar" para salir.`;
     }
