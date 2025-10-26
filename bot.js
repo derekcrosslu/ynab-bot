@@ -16,6 +16,9 @@ const stateManager = require('./adapters/state-manager');
 const flowRouter = require('./flows/router');
 const { ProcessPDFFlow, ProcessImageFlow } = require('./flows/index');
 
+// ===== DUAL-MODE SYSTEM =====
+const modeRouter = require('./mode-router');
+
 require('dotenv').config();
 
 // Configurar Claude
@@ -1526,6 +1529,15 @@ whatsappClient.on('message', async (msg) => {
             debugMessage += `- Normalizado: "${normResult.normalized}"\n`;
             debugMessage += `- Intents detectados: ${normResult.intents.length > 0 ? normResult.intents.join(', ') : 'ninguno'}\n\n`;
 
+            // Mode router stats
+            const modeStats = modeRouter.getModeStats();
+            debugMessage += `🔀 *Modo (Dual-Mode System):*\n`;
+            debugMessage += `- Tu modo actual: ${modeRouter.getUserMode(msg.from)}\n`;
+            debugMessage += `- Modo por defecto: ${modeStats.defaultMode}\n`;
+            debugMessage += `- Multi-agent disponible: ${modeStats.orchestratorReady ? 'Sí' : 'No'}\n`;
+            debugMessage += `- Usuarios en legacy: ${modeStats.legacyUsers} (${modeStats.ratios.legacy})\n`;
+            debugMessage += `- Usuarios en multi-agent: ${modeStats.multiAgentUsers} (${modeStats.ratios.multiAgent})\n\n`;
+
                 debugMessage += `💡 Usa /reset para limpiar historial`;
 
                 await msg.reply(debugMessage);
@@ -1550,6 +1562,11 @@ Usa los números (1, 2, 3, etc.) para navegar por las opciones del menú.
 🔄 /reset - Reiniciar todo (limpia historial)
 🐛 /debug - Ver información del sistema
 ❓ /help - Ver esta ayuda
+
+*Cambio de Modo:*
+🔵 /budgetok o /budgetlegacy - Modo Legacy (flujos probados)
+🟢 /budgetnew - Modo Multi-Agent (nuevas funciones)
+📍 /mode - Ver modo actual
 
 *Navegación en lenguaje natural:*
 También puedes escribir:
@@ -1628,9 +1645,9 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
             }
         }
 
-        // ===== FLOW-BASED ROUTING (PRIMARY) =====
-        // Try flow-based routing first before falling back to menu system
-        const flowResponse = await flowRouter.handleIncomingMessage(
+        // ===== DUAL-MODE ROUTING (PRIMARY) =====
+        // Mode router decides: legacy flows OR multi-agent system
+        const modeResult = await modeRouter.handleMessage(
             msg.from,
             msg.body,
             {
@@ -1638,13 +1655,13 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                 isPDF: pdfText !== null,
                 isImage: imageData !== null,
                 pdfText: pdfText,
-                imageData: imageData  // Pass actual image data for ProcessPDFFlow
+                imageData: imageData
             }
         );
 
-        if (flowResponse) {
-            console.log('✅ Message handled by flow system');
-            await msg.reply(stateManager.addStatusFooter(flowResponse, msg.from));
+        if (modeResult.handled) {
+            console.log(`✅ Message handled by ${modeResult.mode} mode`);
+            await msg.reply(stateManager.addStatusFooter(modeResult.response, msg.from));
             return;
         }
 
