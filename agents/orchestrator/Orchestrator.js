@@ -12,6 +12,7 @@
 
 const BeadsIntegration = require('./BeadsIntegration');
 const BudgetAgent = require('../budget/BudgetAgent');
+const TripAgent = require('../trip/TripAgent');
 
 class Orchestrator {
     constructor(anthropic, ynabService) {
@@ -23,8 +24,12 @@ class Orchestrator {
 
         // Initialize agents
         this.agents = {
-            budget: new BudgetAgent(anthropic, ynabService)
+            budget: new BudgetAgent(anthropic, ynabService),
+            trip: new TripAgent(anthropic, null) // budgetAgent will be set after initialization
         };
+
+        // Connect budgetAgent to tripAgent for expense tracking
+        this.agents.trip.budgetAgent = this.agents.budget;
 
         // Connect memory and clients to all agents
         this.setupAgents();
@@ -121,6 +126,7 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
+- TripAgent: plan_trip, search_flights, search_hotels, create_itinerary, track_booking, get_trip_suggestions
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 
@@ -138,6 +144,8 @@ Examples:
 - "show me my balance" → {"agent": "budget", "action": "view_balance", "confidence": 0.95, "params": {}}
 - "add $50 expense at Starbucks" → {"agent": "budget", "action": "create_transaction", "confidence": 0.90, "params": {"amount": -50, "payee": "Starbucks"}}
 - "categorize pending transactions" → {"agent": "budget", "action": "categorize_transactions", "confidence": 0.85, "params": {}}
+- "plan trip to NYC Dec 11-21" → {"agent": "trip", "action": "plan_trip", "confidence": 0.90, "params": {"destination": "NYC", "dates": "Dec 11-21"}}
+- "suggest beach destinations" → {"agent": "trip", "action": "get_trip_suggestions", "confidence": 0.85, "params": {"interests": "beach"}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 
