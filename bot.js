@@ -31,6 +31,14 @@ flowRouter.setAnthropicClient(anthropic);
 ProcessPDFFlow.setAnthropicClient(anthropic);
 ProcessImageFlow.setAnthropicClient(anthropic);
 
+// ===== MULTI-AGENT ORCHESTRATOR =====
+const Orchestrator = require('./agents/orchestrator/Orchestrator');
+const orchestrator = new Orchestrator(anthropic, ynabService);
+
+// Connect orchestrator to mode router
+modeRouter.setOrchestrator(orchestrator);
+console.log('✅ Multi-agent orchestrator connected to mode router');
+
 // Detectar el path de Chrome según el entorno
 function getChromePath() {
     // En Docker, usar Chrome del sistema (instalado en el Dockerfile)
