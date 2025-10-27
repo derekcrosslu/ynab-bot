@@ -36,11 +36,11 @@ async function authenticate() {
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
     const { client_id, client_secret, redirect_uris } = credentials.installed || credentials.web;
 
-    // Create OAuth2 client
+    // Create OAuth2 client with OOB redirect for command-line auth
     const oAuth2Client = new google.auth.OAuth2(
         client_id,
         client_secret,
-        redirect_uris[0]
+        'urn:ietf:wg:oauth:2.0:oob'  // Use out-of-band for better CLI support
     );
 
     // Check if we already have a token

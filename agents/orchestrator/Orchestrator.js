@@ -372,7 +372,7 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
-- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions
+- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 User location: ${context.userLocation ? 'User has shared their location (use for directions)' : 'No location shared'}
@@ -444,6 +444,21 @@ Examples:
 - "public transport to downtown" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"to": "downtown", "mode": "transit"}}
 - "how do I get to Times Square" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"to": "Times Square", "mode": "driving"}}
 - "bike route to Fisherman's Wharf" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"to": "Fisherman's Wharf", "mode": "bicycling"}}
+
+**Email Checking:**
+- "check my last 5 emails" → {"agent": "trip", "action": "check_emails", "confidence": 0.95, "params": {"limit": 5}}
+- "show me my unread emails" → {"agent": "trip", "action": "check_emails", "confidence": 0.95, "params": {"query": "is:unread"}}
+- "find emails from booking.com" → {"agent": "trip", "action": "check_emails", "confidence": 0.95, "params": {"query": "from:booking.com"}}
+- "search emails about flights" → {"agent": "trip", "action": "check_emails", "confidence": 0.90, "params": {"query": "flights"}}
+- "check my inbox" → {"agent": "trip", "action": "check_emails", "confidence": 0.85, "params": {"query": "in:inbox", "limit": 5}}
+
+**Calendar Checking:**
+- "check my calendar" → {"agent": "trip", "action": "check_calendar", "confidence": 0.95, "params": {}}
+- "show me my calendar" → {"agent": "trip", "action": "check_calendar", "confidence": 0.95, "params": {}}
+- "what's on my calendar" → {"agent": "trip", "action": "check_calendar", "confidence": 0.90, "params": {}}
+- "check my calendar for next 7 days" → {"agent": "trip", "action": "check_calendar", "confidence": 0.95, "params": {"days": "7"}}
+- "upcoming events" → {"agent": "trip", "action": "check_calendar", "confidence": 0.85, "params": {}}
+- "my schedule" → {"agent": "trip", "action": "check_calendar", "confidence": 0.80, "params": {}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 

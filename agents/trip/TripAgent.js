@@ -35,7 +35,9 @@ class TripAgent extends BaseAgent {
             'create_itinerary',
             'track_booking',
             'get_trip_suggestions',
-            'get_directions'
+            'get_directions',
+            'check_emails',
+            'check_calendar'
         ]);
 
         this.anthropic = anthropic;
@@ -134,6 +136,12 @@ class TripAgent extends BaseAgent {
 
                 case 'get_directions':
                     return await this.getDirections(params, context);
+
+                case 'check_emails':
+                    return await this.checkEmails(params, context);
+
+                case 'check_calendar':
+                    return await this.checkCalendar(params, context);
 
                 default:
                     return this.formatResponse(
@@ -1102,6 +1110,201 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
             console.error('❌ [TripAgent] Error getting directions:', error);
             return this.formatResponse(`❌ Sorry, I couldn't get directions: ${error.message}`);
         }
+    }
+
+    /**
+     * 10. CHECK EMAILS - Search Gmail for messages
+     */
+    async checkEmails(params, context) {
+        console.log('📧 [TripAgent] Checking emails with params:', params);
+
+        // Check if Gmail is initialized
+        if (!this.google || !this.google.gmail) {
+            return this.formatResponse(
+                `❌ **Gmail Not Available**\n\n` +
+                `Gmail integration is not set up. This requires Google OAuth authentication.\n\n` +
+                `If you're the admin, please set up OAuth credentials following the SETUP.md guide.`
+            );
+        }
+
+        try {
+            // Parse parameters
+            const { query, search, keyword, limit, maxResults } = params;
+            const searchQuery = query || search || keyword || 'in:inbox';
+            const emailLimit = limit || maxResults || 5;
+
+            console.log(`📧 [TripAgent] Searching Gmail: "${searchQuery}" (limit: ${emailLimit})`);
+
+            // Search Gmail
+            const result = await this.google.searchEmails(searchQuery, emailLimit);
+
+            if (result.error) {
+                return this.formatResponse(`❌ Error searching emails: ${result.error}`);
+            }
+
+            if (!result.messages || result.messages.length === 0) {
+                return this.formatResponse(
+                    `📧 **No Emails Found**\n\n` +
+                    `No emails matching: "${searchQuery}"\n\n` +
+                    `**Try different search terms:**\n` +
+                    `• "is:unread" - Unread emails\n` +
+                    `• "from:booking.com" - From specific sender\n` +
+                    `• "subject:confirmation" - By subject\n` +
+                    `• "after:2025/01/01" - By date`
+                );
+            }
+
+            // Format email list
+            let emailMessage = `📧 **Email Search Results**\n\n`;
+            emailMessage += `Found ${result.messages.length} email${result.messages.length > 1 ? 's' : ''} matching: "${searchQuery}"\n\n`;
+
+            result.messages.forEach((email, index) => {
+                emailMessage += `**${index + 1}. ${email.subject}**\n`;
+                emailMessage += `📤 From: ${email.from}\n`;
+                emailMessage += `📅 Date: ${email.date}\n`;
+
+                if (email.snippet) {
+                    // Trim snippet to 150 chars
+                    const snippet = email.snippet.length > 150
+                        ? email.snippet.substring(0, 150) + '...'
+                        : email.snippet;
+                    emailMessage += `📝 Preview: ${snippet}\n`;
+                }
+
+                emailMessage += `\n`;
+            });
+
+            // Add search tips
+            emailMessage += `💡 **Search Tips:**\n`;
+            emailMessage += `• "check my unread emails"\n`;
+            emailMessage += `• "show emails from booking.com"\n`;
+            emailMessage += `• "find emails about flights"`;
+
+            return this.formatResponse(emailMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error checking emails:', error);
+            return this.formatResponse(`❌ Sorry, I couldn't check your emails: ${error.message}`);
+        }
+    }
+
+    /**
+     * 11. CHECK CALENDAR - View upcoming Google Calendar events
+     */
+    async checkCalendar(params, context) {
+        console.log('📅 [TripAgent] Checking calendar with params:', params);
+
+        // Check if Google Calendar is initialized
+        if (!this.google || !this.google.calendar) {
+            return this.formatResponse(
+                `❌ **Google Calendar Not Available**\n\n` +
+                `Calendar integration is not set up. This requires Google OAuth authentication.\n\n` +
+                `If you're the admin, please set up OAuth credentials following the SETUP.md guide.`
+            );
+        }
+
+        try {
+            // Parse parameters
+            const { days, limit, maxResults } = params;
+            const eventLimit = limit || maxResults || 10;
+
+            // Calculate time range
+            const timeMin = new Date().toISOString();
+            let timeMax = null;
+
+            if (days) {
+                const daysNum = parseInt(days);
+                if (!isNaN(daysNum) && daysNum > 0) {
+                    const maxDate = new Date();
+                    maxDate.setDate(maxDate.getDate() + daysNum);
+                    timeMax = maxDate.toISOString();
+                }
+            }
+
+            console.log(`📅 [TripAgent] Fetching calendar events (limit: ${eventLimit}, days: ${days || 'all'})`);
+
+            // Fetch calendar events
+            const result = await this.google.listEvents(timeMin, timeMax, eventLimit);
+
+            if (result.error) {
+                return this.formatResponse(`❌ Error fetching calendar: ${result.error}`);
+            }
+
+            if (!result.events || result.events.length === 0) {
+                return this.formatResponse(
+                    `📅 **No Upcoming Events**\n\n` +
+                    `You have no events scheduled${timeMax ? ` in the next ${days} days` : ''}.\n\n` +
+                    `💡 **Tip:** When you book flights or hotels, they'll be automatically added to your calendar!`
+                );
+            }
+
+            // Format calendar events
+            let calendarMessage = `📅 **Your Calendar**\n\n`;
+            calendarMessage += `Found ${result.events.length} upcoming event${result.events.length > 1 ? 's' : ''}${timeMax ? ` (next ${days} days)` : ''}:\n\n`;
+
+            result.events.forEach((event, index) => {
+                calendarMessage += `**${index + 1}. ${event.summary || 'Untitled Event'}**\n`;
+
+                // Format date/time
+                const startDate = new Date(event.start);
+                const endDate = new Date(event.end);
+
+                // Check if it's an all-day event
+                const isAllDay = event.start.length === 10; // Date only (YYYY-MM-DD)
+
+                if (isAllDay) {
+                    calendarMessage += `📅 ${this.formatDate(startDate)}`;
+                    if (event.start !== event.end) {
+                        calendarMessage += ` - ${this.formatDate(endDate)}`;
+                    }
+                    calendarMessage += ` (All day)\n`;
+                } else {
+                    calendarMessage += `📅 ${this.formatDate(startDate)}\n`;
+                    calendarMessage += `⏰ ${this.formatTime(startDate)} - ${this.formatTime(endDate)}\n`;
+                }
+
+                if (event.location) {
+                    calendarMessage += `📍 ${event.location}\n`;
+                }
+
+                if (event.description) {
+                    // Trim description to 100 chars
+                    const desc = event.description.length > 100
+                        ? event.description.substring(0, 100) + '...'
+                        : event.description;
+                    calendarMessage += `📝 ${desc}\n`;
+                }
+
+                calendarMessage += `\n`;
+            });
+
+            // Add tips
+            calendarMessage += `💡 **Tips:**\n`;
+            calendarMessage += `• Flight/hotel bookings auto-add to calendar\n`;
+            calendarMessage += `• Say "check my calendar for next 7 days" for specific range`;
+
+            return this.formatResponse(calendarMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error checking calendar:', error);
+            return this.formatResponse(`❌ Sorry, I couldn't check your calendar: ${error.message}`);
+        }
+    }
+
+    /**
+     * Helper: Format date as "Mon, Jan 15, 2025"
+     */
+    formatDate(date) {
+        const options = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
+        return date.toLocaleDateString('en-US', options);
+    }
+
+    /**
+     * Helper: Format time as "2:30 PM"
+     */
+    formatTime(date) {
+        const options = { hour: 'numeric', minute: '2-digit', hour12: true };
+        return date.toLocaleTimeString('en-US', options);
     }
 
     /**
