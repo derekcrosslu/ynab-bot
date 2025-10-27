@@ -40,7 +40,8 @@ class TripAgent extends BaseAgent {
             'check_calendar',
             'check_contacts',
             'check_tasks',
-            'search_youtube'
+            'search_youtube',
+            'check_beads'
         ]);
 
         this.anthropic = anthropic;
@@ -154,6 +155,9 @@ class TripAgent extends BaseAgent {
 
                 case 'search_youtube':
                     return await this.searchYouTube(params, context);
+
+                case 'check_beads':
+                    return await this.checkBeads(params, context);
 
                 default:
                     return this.formatResponse(
@@ -1602,6 +1606,140 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
         } catch (error) {
             console.error('❌ [TripAgent] Error searching YouTube:', error);
             return this.formatResponse(`❌ Sorry, I couldn't search YouTube: ${error.message}`);
+        }
+    }
+
+    /**
+     * 15. CHECK BEADS - Check memory/task system status
+     */
+    async checkBeads(params, context) {
+        console.log('🔮 [TripAgent] Checking Beads with params:', params);
+
+        try {
+            // Parse parameters to determine what to show
+            const { action, type, stats, list, ready, blocked, show, issue_id, id } = params;
+
+            let beadsMessage = `🔮 **Beads Memory System**\n\n`;
+
+            // Determine action
+            if (stats || action === 'stats') {
+                // Show statistics
+                beadsMessage += await this.getBeadsStats();
+            } else if (ready || action === 'ready') {
+                // Show ready tasks
+                beadsMessage += await this.getBeadsReady();
+            } else if (blocked || action === 'blocked') {
+                // Show blocked tasks
+                beadsMessage += await this.getBeadsBlocked();
+            } else if (show || issue_id || id) {
+                // Show specific issue
+                const issueId = show || issue_id || id;
+                beadsMessage += await this.getBeadsIssue(issueId);
+            } else {
+                // Default: List all tasks
+                beadsMessage += await this.getBeadsList();
+            }
+
+            beadsMessage += `\n💡 **Tips:**\n`;
+            beadsMessage += `• "show beads stats" - Overall statistics\n`;
+            beadsMessage += `• "show beads list" - All tasks\n`;
+            beadsMessage += `• "what beads tasks are ready" - Ready to work on\n`;
+            beadsMessage += `• "show blocked beads tasks" - What's blocked`;
+
+            return this.formatResponse(beadsMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error checking Beads:', error);
+            return this.formatResponse(
+                `❌ Sorry, I couldn't check Beads: ${error.message}\n\n` +
+                `Beads might not be initialized. This is optional for basic functionality.`
+            );
+        }
+    }
+
+    /**
+     * Get Beads statistics
+     */
+    async getBeadsStats() {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execPromise = util.promisify(exec);
+
+        try {
+            const { stdout } = await execPromise('bd stats');
+            return `**📊 Statistics:**\n\n${stdout}\n`;
+        } catch (error) {
+            return `⚠️ No statistics available (Beads not initialized)\n\n`;
+        }
+    }
+
+    /**
+     * Get Beads task list
+     */
+    async getBeadsList() {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execPromise = util.promisify(exec);
+
+        try {
+            const { stdout } = await execPromise('bd list --limit 10');
+            return `**📋 Recent Tasks (Last 10):**\n\n${stdout}\n`;
+        } catch (error) {
+            return `⚠️ No tasks found (Beads not initialized)\n\n`;
+        }
+    }
+
+    /**
+     * Get ready tasks (no blockers)
+     */
+    async getBeadsReady() {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execPromise = util.promisify(exec);
+
+        try {
+            const { stdout } = await execPromise('bd ready --limit 10');
+            if (!stdout || stdout.trim() === '') {
+                return `✅ **Ready Tasks:**\n\nNo tasks ready to work on.\n`;
+            }
+            return `✅ **Ready Tasks (No Blockers):**\n\n${stdout}\n`;
+        } catch (error) {
+            return `⚠️ No ready tasks found\n\n`;
+        }
+    }
+
+    /**
+     * Get blocked tasks
+     */
+    async getBeadsBlocked() {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execPromise = util.promisify(exec);
+
+        try {
+            const { stdout } = await execPromise('bd blocked');
+            if (!stdout || stdout.trim() === '') {
+                return `🚫 **Blocked Tasks:**\n\nNo tasks are currently blocked.\n`;
+            }
+            return `🚫 **Blocked Tasks:**\n\n${stdout}\n`;
+        } catch (error) {
+            return `⚠️ No blocked tasks found\n\n`;
+        }
+    }
+
+    /**
+     * Get specific issue details
+     */
+    async getBeadsIssue(issueId) {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execPromise = util.promisify(exec);
+
+        try {
+            const { stdout } = await execPromise(`bd show ${issueId}`);
+            return `**🔍 Issue Details:**\n\n${stdout}\n`;
+        } catch (error) {
+            return `❌ Issue not found: ${issueId}\n\n`;
         }
     }
 

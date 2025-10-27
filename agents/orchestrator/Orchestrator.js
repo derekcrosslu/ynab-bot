@@ -372,7 +372,7 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
-- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar, check_contacts, check_tasks, search_youtube
+- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar, check_contacts, check_tasks, search_youtube, check_beads
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 User location: ${context.userLocation ? 'User has shared their location (use for directions)' : 'No location shared'}
@@ -477,6 +477,14 @@ Examples:
 - "search youtube for cooking tutorials" → {"agent": "trip", "action": "search_youtube", "confidence": 0.95, "params": {"query": "cooking tutorials"}}
 - "youtube best travel destinations 2025" → {"agent": "trip", "action": "search_youtube", "confidence": 0.90, "params": {"query": "best travel destinations 2025"}}
 - "find videos about Paris" → {"agent": "trip", "action": "search_youtube", "confidence": 0.85, "params": {"query": "Paris"}}
+
+**Beads (Memory/Task System):**
+- "show beads stats" → {"agent": "trip", "action": "check_beads", "confidence": 0.95, "params": {"stats": true}}
+- "show beads status" → {"agent": "trip", "action": "check_beads", "confidence": 0.95, "params": {"stats": true}}
+- "check my beads" → {"agent": "trip", "action": "check_beads", "confidence": 0.90, "params": {}}
+- "show beads list" → {"agent": "trip", "action": "check_beads", "confidence": 0.95, "params": {"list": true}}
+- "what beads tasks are ready" → {"agent": "trip", "action": "check_beads", "confidence": 0.90, "params": {"ready": true}}
+- "show blocked beads tasks" → {"agent": "trip", "action": "check_beads", "confidence": 0.90, "params": {"blocked": true}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 
