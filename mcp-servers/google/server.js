@@ -1,5 +1,5 @@
 /**
- * Google MCP Server - Gmail, Calendar, Maps, Contacts, and Tasks Integration
+ * Google MCP Server - Gmail, Calendar, Maps, Contacts, Tasks, and YouTube Integration
  *
  * Provides MCP tools for:
  * - Gmail: Read emails, search for booking confirmations
@@ -7,6 +7,7 @@
  * - Maps: Geocode addresses, get place details, calculate distances
  * - Contacts: Search and manage contacts
  * - Tasks: View and manage tasks/to-do lists
+ * - YouTube: Search videos, channels, playlists
  *
  * Google APIs Docs:
  * - Gmail: https://developers.google.com/gmail/api
@@ -14,6 +15,7 @@
  * - Maps: https://developers.google.com/maps/documentation
  * - People (Contacts): https://developers.google.com/people/api
  * - Tasks: https://developers.google.com/tasks/reference/rest
+ * - YouTube: https://developers.google.com/youtube/v3
  *
  * Note: Google Keep does not have a public API available for third-party apps
  */
@@ -29,6 +31,7 @@ class GoogleMCPServer {
         this.maps = null;
         this.people = null;  // Google People API (Contacts)
         this.tasks = null;   // Google Tasks API
+        this.youtube = null; // YouTube Data API
         this.auth = null;
         this.initialized = false;
     }
@@ -96,13 +99,16 @@ class GoogleMCPServer {
             // Initialize Tasks API
             this.tasks = google.tasks({ version: 'v1', auth: this.auth });
 
+            // Initialize YouTube Data API
+            this.youtube = google.youtube({ version: 'v3', auth: this.auth });
+
             // Initialize Maps (uses API key, not OAuth)
             if (mapsApiKey) {
                 this.mapsApiKey = mapsApiKey;
             }
 
             this.initialized = true;
-            console.log('✅ Google MCP Server initialized (Gmail + Calendar + Maps + Contacts + Tasks)');
+            console.log('✅ Google MCP Server initialized (Gmail + Calendar + Maps + Contacts + Tasks + YouTube)');
 
             return { success: true };
 
@@ -243,14 +249,20 @@ class GoogleMCPServer {
         }
 
         try {
-            const response = await this.calendar.events.list({
+            const params = {
                 calendarId: 'primary',
                 timeMin: timeMin || new Date().toISOString(),
-                timeMax: timeMax,
                 maxResults: maxResults,
                 singleEvents: true,
                 orderBy: 'startTime'
-            });
+            };
+
+            // Only add timeMax if it's provided
+            if (timeMax) {
+                params.timeMax = timeMax;
+            }
+
+            const response = await this.calendar.events.list(params);
 
             const events = response.data.items.map(event => ({
                 id: event.id,
@@ -647,6 +659,66 @@ class GoogleMCPServer {
 
         } catch (error) {
             console.error('❌ Task creation failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ==================== YOUTUBE METHODS ====================
+
+    /**
+     * Search YouTube for videos
+     * @param {string} query - Search query
+     * @param {number} maxResults - Number of results (default 5, max 50)
+     * @param {string} type - Type: 'video', 'channel', 'playlist' (default 'video')
+     */
+    async searchYouTube(query, maxResults = 5, type = 'video') {
+        if (!this.youtube) {
+            return { error: 'YouTube API not initialized' };
+        }
+
+        try {
+            const response = await this.youtube.search.list({
+                part: 'snippet',
+                q: query,
+                type: type,
+                maxResults: Math.min(maxResults, 50), // Max 50 per API docs
+                order: 'relevance',
+                safeSearch: 'moderate'
+            });
+
+            const results = (response.data.items || []).map(item => {
+                const snippet = item.snippet;
+                const result = {
+                    id: item.id.videoId || item.id.channelId || item.id.playlistId,
+                    type: item.id.kind.replace('youtube#', ''),
+                    title: snippet.title,
+                    description: snippet.description,
+                    channelTitle: snippet.channelTitle,
+                    publishedAt: snippet.publishedAt,
+                    thumbnail: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url
+                };
+
+                // Add URL based on type
+                if (item.id.videoId) {
+                    result.url = `https://www.youtube.com/watch?v=${item.id.videoId}`;
+                } else if (item.id.channelId) {
+                    result.url = `https://www.youtube.com/channel/${item.id.channelId}`;
+                } else if (item.id.playlistId) {
+                    result.url = `https://www.youtube.com/playlist?list=${item.id.playlistId}`;
+                }
+
+                return result;
+            });
+
+            return {
+                success: true,
+                results: results,
+                count: results.length,
+                query: query
+            };
+
+        } catch (error) {
+            console.error('❌ YouTube search failed:', error.message);
             return { success: false, error: error.message };
         }
     }

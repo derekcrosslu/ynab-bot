@@ -372,7 +372,7 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
-- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar, check_contacts, check_tasks
+- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar, check_contacts, check_tasks, search_youtube
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 User location: ${context.userLocation ? 'User has shared their location (use for directions)' : 'No location shared'}
@@ -471,6 +471,12 @@ Examples:
 - "check my to-do list" → {"agent": "trip", "action": "check_tasks", "confidence": 0.90, "params": {}}
 - "what tasks do I have" → {"agent": "trip", "action": "check_tasks", "confidence": 0.85, "params": {}}
 - "show tasks with completed" → {"agent": "trip", "action": "check_tasks", "confidence": 0.90, "params": {"showCompleted": true}}
+
+**YouTube:**
+- "find on youtube travel vlog NYC" → {"agent": "trip", "action": "search_youtube", "confidence": 0.95, "params": {"query": "travel vlog NYC"}}
+- "search youtube for cooking tutorials" → {"agent": "trip", "action": "search_youtube", "confidence": 0.95, "params": {"query": "cooking tutorials"}}
+- "youtube best travel destinations 2025" → {"agent": "trip", "action": "search_youtube", "confidence": 0.90, "params": {"query": "best travel destinations 2025"}}
+- "find videos about Paris" → {"agent": "trip", "action": "search_youtube", "confidence": 0.85, "params": {"query": "Paris"}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 

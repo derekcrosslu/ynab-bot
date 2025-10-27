@@ -39,7 +39,8 @@ class TripAgent extends BaseAgent {
             'check_emails',
             'check_calendar',
             'check_contacts',
-            'check_tasks'
+            'check_tasks',
+            'search_youtube'
         ]);
 
         this.anthropic = anthropic;
@@ -89,7 +90,7 @@ class TripAgent extends BaseAgent {
                 if (result.mapsOnly) {
                     console.log('📍 [TripAgent] Google Maps initialized (Other services disabled)');
                 } else {
-                    console.log('📅 [TripAgent] Google services initialized (Gmail + Calendar + Maps + Contacts + Tasks)');
+                    console.log('📅 [TripAgent] Google services initialized (Gmail + Calendar + Maps + Contacts + Tasks + YouTube)');
                 }
             } else if (result.warning) {
                 console.log('⚠️ [TripAgent]', result.warning);
@@ -150,6 +151,9 @@ class TripAgent extends BaseAgent {
 
                 case 'check_tasks':
                     return await this.checkTasks(params, context);
+
+                case 'search_youtube':
+                    return await this.searchYouTube(params, context);
 
                 default:
                     return this.formatResponse(
@@ -1507,6 +1511,97 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
         } catch (error) {
             console.error('❌ [TripAgent] Error checking tasks:', error);
             return this.formatResponse(`❌ Sorry, I couldn't check your tasks: ${error.message}`);
+        }
+    }
+
+    /**
+     * 14. SEARCH YOUTUBE - Search for videos on YouTube
+     */
+    async searchYouTube(params, context) {
+        console.log('🎥 [TripAgent] Searching YouTube with params:', params);
+
+        // Check if YouTube API is initialized
+        if (!this.google || !this.google.youtube) {
+            return this.formatResponse(
+                `❌ **YouTube Not Available**\n\n` +
+                `YouTube integration is not set up. This requires Google OAuth authentication.\n\n` +
+                `If you're the admin, please set up OAuth credentials following the SETUP.md guide.`
+            );
+        }
+
+        try {
+            // Parse parameters
+            const { query, search, keyword, limit, maxResults } = params;
+            const searchQuery = query || search || keyword;
+
+            if (!searchQuery) {
+                return this.formatResponse(
+                    `❌ **Search Query Required**\n\n` +
+                    `Please provide a search term.\n\n` +
+                    `**Examples:**\n` +
+                    `• "find on youtube travel vlog NYC"\n` +
+                    `• "search youtube for cooking tutorials"\n` +
+                    `• "youtube best travel destinations 2025"`
+                );
+            }
+
+            const resultLimit = limit || maxResults || 5;
+
+            console.log(`🎥 [TripAgent] Searching YouTube for: "${searchQuery}" (limit: ${resultLimit})`);
+
+            // Search YouTube
+            const result = await this.google.searchYouTube(searchQuery, resultLimit);
+
+            if (result.error) {
+                return this.formatResponse(`❌ Error searching YouTube: ${result.error}`);
+            }
+
+            if (!result.results || result.results.length === 0) {
+                return this.formatResponse(
+                    `🎥 **No Videos Found**\n\n` +
+                    `No videos matching: "${searchQuery}"\n\n` +
+                    `**Try:**\n` +
+                    `• Different keywords\n` +
+                    `• More general search terms`
+                );
+            }
+
+            // Format YouTube results
+            let youtubeMessage = `🎥 **YouTube Search Results**\n\n`;
+            youtubeMessage += `Found ${result.results.length} video${result.results.length > 1 ? 's' : ''} for: "${searchQuery}"\n\n`;
+
+            result.results.forEach((video, index) => {
+                youtubeMessage += `**${index + 1}. ${video.title}**\n`;
+                youtubeMessage += `📺 Channel: ${video.channelTitle}\n`;
+
+                if (video.description) {
+                    // Trim description to 100 chars
+                    const desc = video.description.length > 100
+                        ? video.description.substring(0, 100) + '...'
+                        : video.description;
+                    youtubeMessage += `📝 ${desc}\n`;
+                }
+
+                // Format published date
+                const publishedDate = new Date(video.publishedAt);
+                youtubeMessage += `📅 ${this.formatDate(publishedDate)}\n`;
+
+                // Add clickable URL
+                youtubeMessage += `🔗 ${video.url}\n`;
+
+                youtubeMessage += `\n`;
+            });
+
+            // Add tips
+            youtubeMessage += `💡 **Tips:**\n`;
+            youtubeMessage += `• Click the links to watch videos\n`;
+            youtubeMessage += `• "find on youtube travel tips NYC" for specific searches`;
+
+            return this.formatResponse(youtubeMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error searching YouTube:', error);
+            return this.formatResponse(`❌ Sorry, I couldn't search YouTube: ${error.message}`);
         }
     }
 
