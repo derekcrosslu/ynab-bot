@@ -1,0 +1,22 @@
+{
+  "name": "google-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server for Gmail, Calendar, and Maps integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0"
+  },
+  "keywords": [
+    "google",
+    "gmail",
+    "calendar",
+    "maps",
+    "mcp"
+  ],
+  "author": "",
+  "license": "MIT"
+}

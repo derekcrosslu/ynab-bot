@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@modelcontextprotocol/server-google-maps": "^0.6.2",
+    "mcp-gsuite": "^0.1.0"
+  }
+}

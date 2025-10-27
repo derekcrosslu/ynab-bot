@@ -28,3 +28,7 @@ logs/
 
 # Docker
 .dockerignore
+
+# Google OAuth credentials (NEVER commit these!)
+mcp-servers/google/credentials.json
+mcp-servers/google/token.json

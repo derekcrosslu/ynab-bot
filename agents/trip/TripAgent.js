@@ -13,12 +13,16 @@
  *
  * Integrations:
  * - Amadeus API for flight and hotel search/booking
+ * - Google Calendar for auto-adding bookings to calendar
+ * - Google Maps for geocoding, distances, place info
+ * - Google Gmail for monitoring booking confirmations (optional)
  * - Beads for trip and booking persistence
  * - BudgetAgent for expense tracking
  */
 
 const BaseAgent = require('../base/BaseAgent');
 const amadeusServer = require('../../mcp-servers/amadeus/server');
+const googleServer = require('../../mcp-servers/google/server');
 
 class TripAgent extends BaseAgent {
     constructor(anthropic, budgetAgent) {
@@ -36,9 +40,11 @@ class TripAgent extends BaseAgent {
         this.anthropic = anthropic;
         this.budgetAgent = budgetAgent;
         this.amadeus = amadeusServer;
+        this.google = googleServer;
 
-        // Initialize Amadeus with credentials from environment
+        // Initialize Amadeus and Google with credentials from environment
         this.initializeAmadeus();
+        this.initializeGoogle();
 
         console.log('🌍 [TripAgent] Initialized with capabilities:', this.capabilities);
     }
@@ -60,6 +66,33 @@ class TripAgent extends BaseAgent {
             }
         } catch (error) {
             console.error('❌ [TripAgent] Error initializing Amadeus:', error.message);
+        }
+    }
+
+    /**
+     * Initialize Google MCP server (Calendar, Maps, Gmail)
+     */
+    async initializeGoogle() {
+        try {
+            const result = await this.google.initialize(
+                process.env.GOOGLE_CREDENTIALS_PATH || './mcp-servers/google/credentials.json',
+                process.env.GOOGLE_TOKEN_PATH || './mcp-servers/google/token.json',
+                process.env.GOOGLE_MAPS_API_KEY
+            );
+
+            if (result.success) {
+                if (result.mapsOnly) {
+                    console.log('📍 [TripAgent] Google Maps initialized (Calendar/Gmail disabled)');
+                } else {
+                    console.log('📅 [TripAgent] Google services initialized (Calendar + Maps + Gmail)');
+                }
+            } else if (result.warning) {
+                console.log('⚠️ [TripAgent]', result.warning);
+            } else {
+                console.error('❌ [TripAgent] Failed to initialize Google:', result.error);
+            }
+        } catch (error) {
+            console.error('❌ [TripAgent] Error initializing Google:', error.message);
         }
     }
 
@@ -406,6 +439,27 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
 
             console.log('✅ [TripAgent] Flight booked successfully:', bookingResult.confirmationCode);
 
+            // Add to Google Calendar (if available)
+            let calendarAdded = false;
+            if (this.google && this.google.calendar) {
+                try {
+                    const calendarEvent = await this.google.createEvent({
+                        summary: `Flight: ${bookingResult.airline} ${bookingResult.flightNumber}`,
+                        description: `Flight Booking\n\nConfirmation: ${bookingResult.confirmationCode}\nRoute: ${bookingResult.route}\nPrice: ${bookingResult.price.currency} ${bookingResult.price.total}`,
+                        location: bookingResult.route,
+                        startTime: bookingResult.departure,
+                        endTime: bookingResult.arrival
+                    });
+
+                    if (calendarEvent.success) {
+                        calendarAdded = true;
+                        console.log('📅 [TripAgent] Added flight to Google Calendar');
+                    }
+                } catch (calendarError) {
+                    console.log('⚠️ [TripAgent] Could not add to calendar:', calendarError.message);
+                }
+            }
+
             // Clear search results after booking
             delete context.flightSearchResults[userId];
 
@@ -415,8 +469,8 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
                 `📅 ${new Date(bookingResult.departure).toLocaleString()}\n` +
                 `💰 ${bookingResult.price.currency} ${bookingResult.price.total}\n\n` +
                 `🎫 **Confirmation:** ${bookingResult.confirmationCode}\n\n` +
-                `📧 Booking confirmation will be sent to your email.\n` +
-                `📅 Would you like me to add this to your calendar? (Reply "yes" to add)\n\n` +
+                `${calendarAdded ? '✅ Added to your Google Calendar\n' : ''}` +
+                `📧 Booking confirmation will be sent to your email.\n\n` +
                 `💡 Tip: Track expenses with "spent ${bookingResult.price.total} on flight"`;
 
             return this.formatResponse(successMessage);
@@ -666,6 +720,31 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
 
             console.log('✅ [TripAgent] Hotel booked successfully:', bookingResult.confirmationCode);
 
+            // Add to Google Calendar (if available)
+            let calendarAdded = false;
+            if (this.google && this.google.calendar) {
+                try {
+                    // Parse check-in and check-out times (default to 3pm check-in, 11am check-out)
+                    const checkInDateTime = `${bookingResult.checkIn}T15:00:00`;
+                    const checkOutDateTime = `${bookingResult.checkOut}T11:00:00`;
+
+                    const calendarEvent = await this.google.createEvent({
+                        summary: `Hotel: ${bookingResult.hotelName}`,
+                        description: `Hotel Booking\n\nConfirmation: ${bookingResult.confirmationCode}\nLocation: ${bookingResult.location}\nNights: ${bookingResult.nights}\nPrice: ${bookingResult.price.currency} ${bookingResult.price.total}`,
+                        location: bookingResult.hotelName + ', ' + bookingResult.location,
+                        startTime: checkInDateTime,
+                        endTime: checkOutDateTime
+                    });
+
+                    if (calendarEvent.success) {
+                        calendarAdded = true;
+                        console.log('📅 [TripAgent] Added hotel to Google Calendar');
+                    }
+                } catch (calendarError) {
+                    console.log('⚠️ [TripAgent] Could not add to calendar:', calendarError.message);
+                }
+            }
+
             // Clear search results after booking
             delete context.hotelSearchResults[userId];
 
@@ -677,8 +756,8 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
                 `🛏️ ${bookingResult.nights} night(s)\n` +
                 `💰 ${bookingResult.price.currency} ${bookingResult.price.total} (${bookingResult.price.currency} ${bookingResult.price.perNight}/night)\n\n` +
                 `🎫 **Confirmation:** ${bookingResult.confirmationCode}\n\n` +
-                `📧 Booking confirmation will be sent to your email.\n` +
-                `📅 Would you like me to add this to your calendar? (Reply "yes" to add)\n\n` +
+                `${calendarAdded ? '✅ Added to your Google Calendar\n' : ''}` +
+                `📧 Booking confirmation will be sent to your email.\n\n` +
                 `💡 Tip: Track expenses with "spent ${bookingResult.price.total} on hotel"`;
 
             return this.formatResponse(successMessage);
