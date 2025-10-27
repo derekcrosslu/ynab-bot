@@ -62,7 +62,8 @@ class AmadeusMCPServer {
                 returnDate,
                 adults = 1,
                 travelClass = 'ECONOMY',
-                maxResults = 5
+                maxResults = 5,
+                currencyCode = 'USD'  // Default to USD
             } = params;
 
             console.log(`🔍 Searching flights: ${origin} → ${destination} on ${departureDate}`);
@@ -74,6 +75,7 @@ class AmadeusMCPServer {
                 departureDate: departureDate,
                 adults: adults,
                 travelClass: travelClass,
+                currencyCode: currencyCode,
                 max: maxResults
             };
 
