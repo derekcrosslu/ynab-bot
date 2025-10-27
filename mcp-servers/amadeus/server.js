@@ -24,10 +24,11 @@ class AmadeusMCPServer {
         try {
             this.amadeus = new Amadeus({
                 clientId: apiKey,
-                clientSecret: apiSecret
+                clientSecret: apiSecret,
+                hostname: 'production'  // Use production API endpoint
             });
             this.initialized = true;
-            console.log('✅ Amadeus MCP Server initialized');
+            console.log('✅ Amadeus MCP Server initialized (Production)');
             return { success: true };
         } catch (error) {
             console.error('❌ Failed to initialize Amadeus:', error.message);
