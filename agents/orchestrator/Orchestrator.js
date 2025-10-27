@@ -278,7 +278,9 @@ ${modeDescription}
                 userId: userId,
                 memory: this.beads,
                 approvalRequired: approvalRequired,
-                tripContext: this.userTripContext.get(userId) || null  // Include trip context
+                tripContext: this.userTripContext.get(userId) || null,  // Include trip context
+                // Include all context from request (userLocation, documents, etc.)
+                ...request.context
             };
 
             const result = await agent.handleRequest(agentRequest, context);
