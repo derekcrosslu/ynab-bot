@@ -28,6 +28,9 @@ class Orchestrator {
         // Track user's trip context (planning, active-trip, post-trip)
         this.userTripContext = new Map();
 
+        // Track user's last active context (for context continuity)
+        this.userLastContext = new Map(); // userId -> { agent: 'budget|trip', timestamp: Date, action: 'view_balance|get_directions|etc' }
+
         // Initialize agents
         this.agents = {
             budget: new BudgetAgent(anthropic, ynabService),
@@ -249,10 +252,45 @@ ${modeDescription}
                 };
             } else {
                 // No preference - parse intent with AI
-                intent = await this.parseIntent(request.message, request.context);
+                intent = await this.parseIntent(request.message, request.context, userId);
             }
 
             console.log(`🎯 Detected intent: ${intent.action} (agent: ${intent.agent}, confidence: ${intent.confidence})`);
+
+            // === CHECK FOR CONTEXT SWITCHING ===
+            const lastContext = this.userLastContext.get(userId);
+            const isContextSwitch = lastContext && lastContext.agent !== intent.agent;
+
+            // Only ask for confirmation if:
+            // 1. User was recently in a different context (within last 5 minutes)
+            // 2. Confidence is not very high (< 0.9)
+            // 3. Message is ambiguous (could belong to either context)
+            const contextSwitchNeedsConfirmation = isContextSwitch &&
+                lastContext &&
+                (Date.now() - lastContext.timestamp) < 5 * 60 * 1000 && // Within 5 minutes
+                intent.confidence < 0.9; // Not very confident
+
+            if (contextSwitchNeedsConfirmation) {
+                console.log(`⚠️ Context switch detected: ${lastContext.agent} → ${intent.agent} (confidence: ${intent.confidence})`);
+
+                // Ask user for confirmation
+                const lastAgentName = lastContext.agent === 'budget' ? 'Budget' : 'Trip Planning';
+                const newAgentName = intent.agent === 'budget' ? 'Budget' : 'Trip Planning';
+
+                return {
+                    message: `🔄 **Context Switch Detected**\n\n` +
+                        `You were working with: **${lastAgentName}**\n` +
+                        `New request seems to be: **${newAgentName}**\n\n` +
+                        `**Your message:** "${request.message}"\n\n` +
+                        `**What would you like to do?**\n` +
+                        `• Reply "yes" to switch to ${newAgentName}\n` +
+                        `• Reply "no" to stay in ${lastAgentName}\n` +
+                        `• Or rephrase your request to be more specific`,
+                    requiresConfirmation: true,
+                    pendingIntent: intent, // Store for later
+                    handled: true
+                };
+            }
 
             // Select appropriate agent
             const agent = this.selectAgent(intent.agent);
@@ -285,6 +323,14 @@ ${modeDescription}
 
             const result = await agent.handleRequest(agentRequest, context);
 
+            // Update user's last context (for future context continuity)
+            this.userLastContext.set(userId, {
+                agent: intent.agent,
+                action: intent.action,
+                timestamp: Date.now()
+            });
+            console.log(`📝 Updated last context for ${userId}: ${intent.agent} (${intent.action})`);
+
             // Format and return response
             return {
                 message: result.message || result.response || 'Request processed',
@@ -308,10 +354,16 @@ ${modeDescription}
      * Parse user intent using Claude
      * @param {string} message - User message
      * @param {Object} context - Additional context
+     * @param {string} userId - User ID (to check last context)
      * @returns {Promise<Object>} Intent object
      */
-    async parseIntent(message, context = {}) {
+    async parseIntent(message, context = {}, userId = null) {
         try {
+            // Get user's last context for continuity
+            const lastContext = userId ? this.userLastContext.get(userId) : null;
+            const lastAgent = lastContext?.agent || 'none';
+            const lastAction = lastContext?.action || 'none';
+
             const prompt = `Analyze this user message and determine their intent.
 
 User message: "${message}"
@@ -321,6 +373,12 @@ Available agents and their capabilities:
 - TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
+User location: ${context.userLocation ? 'User has shared their location (use for directions)' : 'No location shared'}
+
+IMPORTANT - CONTEXT CONTINUITY:
+User's last action was: ${lastAgent} agent (${lastAction})
+GIVE PRIORITY to staying in the same context (${lastAgent}) UNLESS the message CLEARLY indicates a different intent.
+If the message is ambiguous or could belong to either context, PREFER ${lastAgent} agent.
 
 Return a JSON object with:
 {
