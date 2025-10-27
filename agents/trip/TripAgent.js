@@ -250,7 +250,7 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             console.log(`📍 [TripAgent] Found ${locations.length} locations:`, locations);
 
             // Generate Google Maps multi-stop URL
-            const mapsUrl = this.generateGoogleMapsMultiStopURL(locations);
+            const mapsUrl = this.generateGoogleMapsMultiStopURL(locations, 'transit', destination);
             console.log('🔗 [TripAgent] Generated maps URL:', mapsUrl);
 
             // Try to save trip plan to memory (optional - continue if Beads not available)
@@ -2318,9 +2318,10 @@ EXAMPLES OF WHAT TO EXCLUDE:
      * Generate Google Maps URL with multiple waypoints
      * @param {Array<string>} locations - Array of location names
      * @param {string} travelMode - Travel mode: 'transit', 'walking', 'bicycling', 'driving' (default: 'transit')
+     * @param {string} destination - Destination city to append to location names for disambiguation
      * @returns {string} Google Maps URL
      */
-    generateGoogleMapsMultiStopURL(locations, travelMode = 'transit') {
+    generateGoogleMapsMultiStopURL(locations, travelMode = 'transit', destination = null) {
         if (!locations || locations.length === 0) {
             return null;
         }
@@ -2333,7 +2334,20 @@ EXAMPLES OF WHAT TO EXCLUDE:
 
         // Multi-stop route with travel mode
         // Format: /dir/location1/location2/location3/?travelmode=transit
-        const encodedLocations = locations.map(loc => encodeURIComponent(loc));
+        // Add destination city to each location to prevent Google Maps from finding wrong locations
+        const disambiguatedLocations = locations.map((loc, index) => {
+            // Skip first location if it's already the destination
+            if (index === 0 && destination && loc.toLowerCase().includes(destination.toLowerCase())) {
+                return loc;
+            }
+            // Add destination to other locations if not already included
+            if (destination && !loc.toLowerCase().includes(destination.toLowerCase())) {
+                return `${loc}, ${destination}`;
+            }
+            return loc;
+        });
+
+        const encodedLocations = disambiguatedLocations.map(loc => encodeURIComponent(loc));
         const baseUrl = `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
 
         // Add travel mode parameter
