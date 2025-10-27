@@ -36,6 +36,51 @@ class AmadeusMCPServer {
     }
 
     /**
+     * Select diverse flight offers prioritizing different airlines
+     * @param {Array} offers - All flight offers
+     * @param {number} maxResults - Maximum number of results to return
+     * @returns {Array} Selected diverse offers
+     */
+    selectDiverseOffers(offers, maxResults = 5) {
+        if (offers.length <= maxResults) {
+            return offers;
+        }
+
+        const selected = [];
+        const seenAirlines = new Set();
+        const remaining = [];
+
+        // First pass: select one flight from each unique airline
+        for (const offer of offers) {
+            const airline = offer.outbound.airline;
+            if (!seenAirlines.has(airline)) {
+                selected.push(offer);
+                seenAirlines.add(airline);
+                if (selected.length >= maxResults) {
+                    return selected;
+                }
+            } else {
+                remaining.push(offer);
+            }
+        }
+
+        // Second pass: fill remaining slots with best prices
+        remaining.sort((a, b) => parseFloat(a.price.total) - parseFloat(b.price.total));
+        while (selected.length < maxResults && remaining.length > 0) {
+            selected.push(remaining.shift());
+        }
+
+        // Re-sort by price
+        selected.sort((a, b) => parseFloat(a.price.total) - parseFloat(b.price.total));
+
+        // Re-index after selection
+        return selected.map((offer, index) => ({
+            ...offer,
+            index: index + 1
+        }));
+    }
+
+    /**
      * Search for flights
      * @param {Object} params
      * @param {string} params.origin - Origin airport code (e.g., LAX)
@@ -76,7 +121,8 @@ class AmadeusMCPServer {
                 adults: adults,
                 travelClass: travelClass,
                 currencyCode: currencyCode,
-                max: maxResults
+                max: Math.max(maxResults * 3, 15), // Request more results to get airline diversity
+                nonStop: false  // Allow connecting flights to get more airline options
             };
 
             // Add return date if round-trip
@@ -135,7 +181,15 @@ class AmadeusMCPServer {
                 };
             });
 
-            console.log(`✅ Found ${offers.length} flight options`);
+            console.log(`✅ Found ${offers.length} flight options from API`);
+
+            // Log unique airlines found
+            const uniqueAirlines = [...new Set(offers.map(o => o.outbound.airline))];
+            console.log(`✈️  Airlines found: ${uniqueAirlines.join(', ')}`);
+
+            // Select diverse airlines - prioritize showing different carriers
+            const diverseOffers = this.selectDiverseOffers(offers, maxResults);
+            console.log(`✅ Selected ${diverseOffers.length} diverse flight options`);
 
             return {
                 success: true,
@@ -147,7 +201,7 @@ class AmadeusMCPServer {
                     passengers: adults,
                     class: travelClass
                 },
-                offers: offers
+                offers: diverseOffers
             };
 
         } catch (error) {
