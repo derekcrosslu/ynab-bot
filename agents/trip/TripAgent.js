@@ -2144,12 +2144,21 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
 Locations to validate:
 ${JSON.stringify(locations, null, 2)}
 
-For each location, determine if it is ACTUALLY located in or near ${destination}.
+For EACH location, determine if it is ACTUALLY, PHYSICALLY located in or near ${destination}.
 
-Return a JSON array containing ONLY the locations that are truly in ${destination}.
-Remove any locations from other cities or countries.
+STRICT FILTERING RULES:
+1. If a location mentions a street/avenue name from another city → EXCLUDE
+2. If a location is clearly from another country → EXCLUDE
+3. If you're not 100% certain it's in ${destination} → EXCLUDE
+4. Street addresses (Av., Calle, Street, etc.) → EXCLUDE unless obviously in ${destination}
 
-Example: If destination is "New York" and locations include "Oscar R. Benavides" (which is in Lima, Peru), EXCLUDE it.
+Known examples to ALWAYS EXCLUDE:
+- "Oscar R. Benavides" or "Av. Oscar R. Benavides" → Lima, Peru (NOT New York)
+- "Miraflores" → Lima, Peru (NOT New York)
+- Any location with "Lima", "Peru", "Barranco", "San Isidro" → Peru locations
+
+Return a JSON array containing ONLY the locations that are 100% certainly in ${destination}.
+When in doubt, EXCLUDE the location.
 
 Return ONLY the JSON array, nothing else.`;
 
@@ -2193,7 +2202,7 @@ Return ONLY the JSON array, nothing else.`;
      */
     async extractLocationsFromTripPlan(tripPlan, destination) {
         try {
-            const extractPrompt = `From the following trip plan for **${destination}**, extract the TOP 5-7 most important locations/attractions mentioned (museums, parks, landmarks, neighborhoods, etc.).
+            const extractPrompt = `From the following trip plan for **${destination}**, extract the TOP 5-7 most important locations/attractions mentioned.
 
 Trip plan:
 ${tripPlan}
@@ -2201,14 +2210,20 @@ ${tripPlan}
 Return ONLY a JSON array of location names, like:
 ["Times Square", "Central Park", "Rockefeller Center", "Brooklyn Bridge", "Statue of Liberty"]
 
-CRITICAL REQUIREMENTS:
-- ONLY extract locations that are actually in/near ${destination}
-- Ignore any locations from other cities or countries
+CRITICAL REQUIREMENTS - READ CAREFULLY:
+- ONLY extract locations that are PHYSICALLY located in/near ${destination}
+- DO NOT include locations from other cities or countries under ANY circumstances
+- DO NOT include street addresses or avenue names (like "Av. Something", "123 Main St", etc.)
+- ONLY include well-known landmarks, museums, parks, neighborhoods, monuments
+- Use simple landmark names without full addresses
+- If you're unsure whether a location is in ${destination}, DO NOT include it
 - Include the main city/destination first
-- Only include specific places mentioned in the plan
-- Use commonly recognized names
 - Maximum 7 locations total
-- If a location name doesn't clearly indicate it's in ${destination}, add the city name (e.g., "Times Square, New York")`;
+
+EXAMPLES OF WHAT TO EXCLUDE:
+- Street addresses: "Av. Oscar R. Benavides", "123 Main Street"
+- Locations from other cities: If planning NYC, exclude anything from Lima, London, etc.
+- Ambiguous locations: If unsure, leave it out`;
 
             const response = await this.anthropic.messages.create({
                 model: 'claude-sonnet-4-20250514',
