@@ -221,6 +221,92 @@ class AmadeusMCPServer {
     }
 
     /**
+     * Get airline name from IATA code
+     */
+    getAirlineName(code) {
+        const airlines = {
+            // Major US Airlines
+            'AA': 'American Airlines',
+            'DL': 'Delta Air Lines',
+            'UA': 'United Airlines',
+            'WN': 'Southwest Airlines',
+            'B6': 'JetBlue Airways',
+            'AS': 'Alaska Airlines',
+            'NK': 'Spirit Airlines',
+            'F9': 'Frontier Airlines',
+
+            // Latin American Airlines
+            'CM': 'Copa Airlines',
+            'AV': 'Avianca',
+            'LA': 'LATAM Airlines',
+            'AM': 'Aeroméxico',
+            'AR': 'Aerolíneas Argentinas',
+            'G3': 'GOL Linhas Aéreas',
+            'JJ': 'LATAM Brasil',
+            'VB': 'VivaAerobus',
+            'Y4': 'Volaris',
+            '4M': 'LATAM Argentina',
+            'XL': 'LATAM Ecuador',
+            '4C': 'LATAM Colombia',
+            'PZ': 'LATAM Paraguay',
+
+            // European Airlines
+            'BA': 'British Airways',
+            'LH': 'Lufthansa',
+            'AF': 'Air France',
+            'KL': 'KLM',
+            'IB': 'Iberia',
+            'AZ': 'ITA Airways',
+            'LX': 'SWISS',
+            'OS': 'Austrian Airlines',
+            'SN': 'Brussels Airlines',
+            'TP': 'TAP Air Portugal',
+            'UX': 'Air Europa',
+            'VY': 'Vueling',
+
+            // Asian Airlines
+            'NH': 'ANA',
+            'JL': 'Japan Airlines',
+            'SQ': 'Singapore Airlines',
+            'CX': 'Cathay Pacific',
+            'TG': 'Thai Airways',
+            'MH': 'Malaysia Airlines',
+            'PR': 'Philippine Airlines',
+            'KE': 'Korean Air',
+            'OZ': 'Asiana Airlines',
+
+            // Middle Eastern Airlines
+            'EK': 'Emirates',
+            'QR': 'Qatar Airways',
+            'EY': 'Etihad Airways',
+            'TK': 'Turkish Airlines',
+
+            // Canadian Airlines
+            'AC': 'Air Canada',
+            'WS': 'WestJet',
+
+            // Australian Airlines
+            'QF': 'Qantas',
+            'VA': 'Virgin Australia',
+
+            // Low-Cost Carriers
+            'FR': 'Ryanair',
+            'U2': 'easyJet',
+            'W6': 'Wizz Air',
+            'VW': 'Aeromar',
+
+            // Other Notable Airlines
+            'EI': 'Aer Lingus',
+            'AY': 'Finnair',
+            'SK': 'SAS',
+            'LO': 'LOT Polish Airlines'
+        };
+
+        // Return full name if found, otherwise return code with generic label
+        return airlines[code] || `${code} Airlines`;
+    }
+
+    /**
      * Format flight offers for display
      */
     formatFlightOffersForDisplay(searchResult) {
@@ -245,13 +331,16 @@ class AmadeusMCPServer {
         message += `**${offers.length} Options:**\n\n`;
 
         offers.forEach(offer => {
-            message += `**${offer.index}. ${offer.outbound.airline} ${offer.outbound.flightNumber}** - ${offer.price.currency} ${offer.price.total}\n`;
+            const airlineName = this.getAirlineName(offer.outbound.airline);
+            message += `**${offer.index}. ${airlineName}** (${offer.outbound.airline}${offer.outbound.flightNumber}) - ${offer.price.currency} ${offer.price.total}\n`;
             message += `   Depart: ${offer.outbound.departure.airport} at ${new Date(offer.outbound.departure.time).toLocaleString()}\n`;
             message += `   Arrive: ${offer.outbound.arrival.airport} at ${new Date(offer.outbound.arrival.time).toLocaleString()}\n`;
             message += `   Duration: ${offer.outbound.duration}, Stops: ${offer.outbound.stops}\n`;
 
             if (offer.inbound) {
-                message += `   Return: ${offer.inbound.departure.airport} at ${new Date(offer.inbound.departure.time).toLocaleString()}\n`;
+                const returnAirlineName = this.getAirlineName(offer.inbound.airline);
+                message += `   Return: ${returnAirlineName} (${offer.inbound.airline}${offer.inbound.flightNumber})\n`;
+                message += `   Depart: ${offer.inbound.departure.airport} at ${new Date(offer.inbound.departure.time).toLocaleString()}\n`;
                 message += `   Arrive: ${offer.inbound.arrival.airport} at ${new Date(offer.inbound.arrival.time).toLocaleString()}\n`;
             }
             message += `\n`;
