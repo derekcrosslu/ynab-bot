@@ -423,6 +423,10 @@ Examples:
 - "search flights from LAX to NRT on Dec 11" → {"agent": "trip", "action": "search_flights", "confidence": 0.95, "params": {"from": "LAX", "to": "NRT", "dates": "Dec 11"}}
 - "find flights LAX to Tokyo Dec 11" → {"agent": "trip", "action": "search_flights", "confidence": 0.90, "params": {"from": "LAX", "to": "Tokyo", "dates": "Dec 11"}}
 - "flights from NYC to Paris Dec 15-22" → {"agent": "trip", "action": "search_flights", "confidence": 0.95, "params": {"from": "NYC", "to": "Paris", "dates": "Dec 15-22"}}
+- "flights from Lima to NYC Dec 11-21 avoid Spirit" → {"agent": "trip", "action": "search_flights", "confidence": 0.95, "params": {"from": "Lima", "to": "NYC", "dates": "Dec 11-21", "exclude": ["Spirit"]}}
+- "flights from Lima to NYC Dec 11-21 exclude Spirit Airlines" → {"agent": "trip", "action": "search_flights", "confidence": 0.95, "params": {"from": "Lima", "to": "NYC", "dates": "Dec 11-21", "exclude": ["Spirit Airlines"]}}
+- "search flights LAX to NRT prefer Copa or Avianca" → {"agent": "trip", "action": "search_flights", "confidence": 0.90, "params": {"from": "LAX", "to": "NRT", "dates": null, "prefer": ["Copa", "Avianca"]}}
+- "flights from NYC to Lima only American Airlines, Delta, United" → {"agent": "trip", "action": "search_flights", "confidence": 0.90, "params": {"from": "NYC", "to": "Lima", "dates": null, "only": ["American Airlines", "Delta", "United"]}}
 
 **Hotel Search:**
 - "search hotels in Tokyo Dec 11-21" → {"agent": "trip", "action": "search_hotels", "confidence": 0.95, "params": {"destination": "Tokyo", "dates": "Dec 11-21"}}

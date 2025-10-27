@@ -246,7 +246,7 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
     async searchFlights(params, context) {
         console.log('✈️ [TripAgent] Searching flights with params:', params);
 
-        const { from, to, dates, passengers, class: flightClass } = params;
+        const { from, to, dates, passengers, class: flightClass, exclude, prefer, only } = params;
 
         // Validate required params
         if (!from || !to) {
@@ -328,6 +328,52 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
                 return this.formatResponse(`❌ No flights found for ${originCode} → ${destinationCode} on ${departureDate}${returnDate ? ` (return ${returnDate})` : ''}\n\n💡 Try different dates or nearby airports.`);
             }
 
+            // Filter by airline preferences
+            let filteredOffers = searchResult.offers;
+            const originalCount = filteredOffers.length;
+
+            if (exclude && exclude.length > 0) {
+                filteredOffers = filteredOffers.filter(offer => {
+                    const airlineCode = offer.outbound.airline;
+                    const airlineName = this.amadeus.getAirlineName(airlineCode);
+                    return !this.airlineMatches(airlineCode, airlineName, exclude);
+                });
+                console.log(`🚫 [TripAgent] Excluded airlines: ${exclude.join(', ')} - ${originalCount - filteredOffers.length} flights filtered`);
+            }
+
+            if (only && only.length > 0) {
+                filteredOffers = filteredOffers.filter(offer => {
+                    const airlineCode = offer.outbound.airline;
+                    const airlineName = this.amadeus.getAirlineName(airlineCode);
+                    return this.airlineMatches(airlineCode, airlineName, only);
+                });
+                console.log(`✅ [TripAgent] Only airlines: ${only.join(', ')} - ${filteredOffers.length} flights match`);
+            }
+
+            if (prefer && prefer.length > 0) {
+                // Sort preferred airlines to the top
+                filteredOffers.sort((a, b) => {
+                    const aCode = a.outbound.airline;
+                    const aName = this.amadeus.getAirlineName(aCode);
+                    const bCode = b.outbound.airline;
+                    const bName = this.amadeus.getAirlineName(bCode);
+                    const aPreferred = this.airlineMatches(aCode, aName, prefer);
+                    const bPreferred = this.airlineMatches(bCode, bName, prefer);
+                    if (aPreferred && !bPreferred) return -1;
+                    if (!aPreferred && bPreferred) return 1;
+                    return 0;
+                });
+                console.log(`⭐ [TripAgent] Preferred airlines: ${prefer.join(', ')} - sorted to top`);
+            }
+
+            if (filteredOffers.length === 0) {
+                const filterMsg = exclude ? `excluding ${exclude.join(', ')}` : only ? `matching ${only.join(', ')}` : '';
+                return this.formatResponse(`❌ No flights found for ${originCode} → ${destinationCode} ${filterMsg}\n\n💡 Try:\n• Different airlines\n• Different dates\n• Nearby airports`);
+            }
+
+            // Update search result with filtered offers
+            searchResult.offers = filteredOffers;
+
             // Store search results in context for booking
             if (!context.flightSearchResults) {
                 context.flightSearchResults = {};
@@ -358,6 +404,34 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             const errorMessage = error.message || error.toString() || 'Unknown error occurred';
             return this.formatResponse(`❌ Sorry, I couldn't search flights: ${errorMessage}`);
         }
+    }
+
+    /**
+     * Check if airline matches any of the filter names
+     * @param {string} airlineCode - IATA airline code (e.g., "NK", "AA")
+     * @param {string} airlineName - Full airline name (e.g., "Spirit Airlines")
+     * @param {Array<string>} filters - List of airline names/codes to match
+     * @returns {boolean} True if airline matches any filter
+     */
+    airlineMatches(airlineCode, airlineName, filters) {
+        if (!filters || filters.length === 0) return false;
+
+        return filters.some(filter => {
+            const filterLower = filter.toLowerCase().trim();
+            const codeLower = airlineCode.toLowerCase();
+            const nameLower = airlineName.toLowerCase();
+
+            // Check exact code match
+            if (codeLower === filterLower) return true;
+
+            // Check if filter is contained in airline name
+            if (nameLower.includes(filterLower)) return true;
+
+            // Check if airline name is contained in filter (for variations like "Spirit" matching "Spirit Airlines")
+            if (filterLower.includes(nameLower)) return true;
+
+            return false;
+        });
     }
 
     /**
