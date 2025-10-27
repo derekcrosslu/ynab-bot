@@ -353,6 +353,98 @@ class GoogleMCPServer {
             return { success: false, error: error.message };
         }
     }
+
+    /**
+     * Get directions between two locations
+     * @param {string} origin - Starting location (address or place name)
+     * @param {string} destination - Ending location (address or place name)
+     * @param {string} mode - Travel mode: 'driving', 'walking', 'transit', 'bicycling' (default: 'driving')
+     * @param {string} departureTime - Optional departure time for transit (ISO string or 'now')
+     * @returns {object} Directions with route, distance, duration, and steps
+     */
+    async getDirections(origin, destination, mode = 'driving', departureTime = null) {
+        if (!this.mapsApiKey) {
+            return { error: 'Maps API key not configured' };
+        }
+
+        // Validate travel mode
+        const validModes = ['driving', 'walking', 'transit', 'bicycling'];
+        if (!validModes.includes(mode)) {
+            return { success: false, error: `Invalid mode. Use: ${validModes.join(', ')}` };
+        }
+
+        try {
+            let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&mode=${mode}&key=${this.mapsApiKey}`;
+
+            // Add departure time for transit mode
+            if (mode === 'transit' && departureTime) {
+                const timestamp = departureTime === 'now'
+                    ? Math.floor(Date.now() / 1000)
+                    : Math.floor(new Date(departureTime).getTime() / 1000);
+                url += `&departure_time=${timestamp}`;
+            }
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (data.status !== 'OK') {
+                return { success: false, error: data.status, message: data.error_message };
+            }
+
+            const route = data.routes[0];
+            const leg = route.legs[0];
+
+            // Parse steps with instructions
+            const steps = leg.steps.map((step, index) => {
+                const stepData = {
+                    stepNumber: index + 1,
+                    instruction: step.html_instructions.replace(/<[^>]*>/g, ''), // Remove HTML tags
+                    distance: step.distance.text,
+                    duration: step.duration.text,
+                    travelMode: step.travel_mode
+                };
+
+                // Add transit details if available
+                if (step.transit_details) {
+                    const transit = step.transit_details;
+                    stepData.transit = {
+                        line: transit.line.short_name || transit.line.name,
+                        vehicle: transit.line.vehicle.type,
+                        departure: {
+                            stop: transit.departure_stop.name,
+                            time: transit.departure_time.text
+                        },
+                        arrival: {
+                            stop: transit.arrival_stop.name,
+                            time: transit.arrival_time.text
+                        },
+                        numStops: transit.num_stops,
+                        headsign: transit.headsign
+                    };
+                }
+
+                return stepData;
+            });
+
+            return {
+                success: true,
+                route: {
+                    origin: leg.start_address,
+                    destination: leg.end_address,
+                    distance: leg.distance.text,
+                    duration: leg.duration.text,
+                    mode: mode,
+                    steps: steps,
+                    summary: route.summary,
+                    warnings: route.warnings || []
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ Directions request failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 // Export singleton instance

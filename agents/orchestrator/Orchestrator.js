@@ -316,7 +316,7 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
-- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions
+- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 
@@ -352,6 +352,13 @@ Examples:
 **Booking:**
 - "book option 1" → {"agent": "trip", "action": "book_flight", "confidence": 0.95, "params": {"option": "1"}}
 - "book hotel option 2" → {"agent": "trip", "action": "book_hotel", "confidence": 0.95, "params": {"option": "2"}}
+
+**Directions:**
+- "directions from Times Square to JFK Airport" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"from": "Times Square", "to": "JFK Airport", "mode": "driving"}}
+- "walking directions from Central Park to MoMA" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"from": "Central Park", "to": "MoMA", "mode": "walking"}}
+- "public transport from LAX to downtown LA" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"from": "LAX", "to": "downtown LA", "mode": "transit"}}
+- "how do I get from Brooklyn to Manhattan" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"from": "Brooklyn", "to": "Manhattan", "mode": "driving"}}
+- "bike route from Golden Gate Park to Fisherman's Wharf" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"from": "Golden Gate Park", "to": "Fisherman's Wharf", "mode": "bicycling"}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 

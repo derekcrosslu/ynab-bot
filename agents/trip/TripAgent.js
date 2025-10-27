@@ -34,7 +34,8 @@ class TripAgent extends BaseAgent {
             'book_hotel',
             'create_itinerary',
             'track_booking',
-            'get_trip_suggestions'
+            'get_trip_suggestions',
+            'get_directions'
         ]);
 
         this.anthropic = anthropic;
@@ -130,6 +131,9 @@ class TripAgent extends BaseAgent {
 
                 case 'get_trip_suggestions':
                     return await this.getTripSuggestions(params, context);
+
+                case 'get_directions':
+                    return await this.getDirections(params, context);
 
                 default:
                     return this.formatResponse(
@@ -935,6 +939,126 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
         } catch (error) {
             console.error('❌ [TripAgent] Error getting suggestions:', error);
             return this.formatResponse(`❌ Sorry, I couldn't generate trip suggestions: ${error.message}`);
+        }
+    }
+
+    /**
+     * 9. GET DIRECTIONS - Route directions between two locations
+     */
+    async getDirections(params, context) {
+        console.log('🗺️ [TripAgent] Getting directions with params:', params);
+
+        const { from, to, origin, destination, mode, travelMode } = params;
+
+        // Support both 'from/to' and 'origin/destination' parameter names
+        const startLocation = from || origin;
+        const endLocation = to || destination;
+
+        // Support both 'mode' and 'travelMode' parameter names
+        const transportMode = (mode || travelMode || 'driving').toLowerCase();
+
+        // Validate required parameters
+        if (!startLocation || !endLocation) {
+            return this.formatResponse(
+                `❌ I need both a starting point and destination to get directions.\n\n` +
+                `**Example:**\n` +
+                `• "directions from Times Square to JFK Airport"\n` +
+                `• "walking directions from Central Park to MoMA"\n` +
+                `• "public transport from LAX to downtown LA"`
+            );
+        }
+
+        // Validate travel mode
+        const validModes = ['driving', 'walking', 'transit', 'bicycling'];
+        const selectedMode = validModes.includes(transportMode) ? transportMode : 'driving';
+
+        // Get travel mode emoji
+        const modeEmoji = {
+            driving: '🚗',
+            walking: '🚶',
+            transit: '🚇',
+            bicycling: '🚴'
+        };
+
+        try {
+            console.log(`🗺️ [TripAgent] Fetching ${selectedMode} directions: ${startLocation} → ${endLocation}`);
+
+            // Get directions from Google Maps
+            const result = await this.google.getDirections(
+                startLocation,
+                endLocation,
+                selectedMode,
+                selectedMode === 'transit' ? 'now' : null // Use current time for transit
+            );
+
+            if (!result.success) {
+                return this.formatResponse(
+                    `❌ Could not find directions: ${result.error}\n\n` +
+                    `Please check that both locations are valid.`
+                );
+            }
+
+            const route = result.route;
+
+            // Format directions for WhatsApp
+            let directionsMessage = `${modeEmoji[selectedMode]} **${selectedMode.toUpperCase()} DIRECTIONS**\n\n`;
+            directionsMessage += `📍 **From:** ${route.origin}\n`;
+            directionsMessage += `📍 **To:** ${route.destination}\n\n`;
+            directionsMessage += `📏 **Distance:** ${route.distance}\n`;
+            directionsMessage += `⏱️ **Duration:** ${route.duration}\n`;
+
+            if (route.summary) {
+                directionsMessage += `🛣️ **Route:** ${route.summary}\n`;
+            }
+
+            directionsMessage += `\n**STEP-BY-STEP DIRECTIONS:**\n\n`;
+
+            // Add each step
+            route.steps.forEach((step, index) => {
+                // For transit, show special formatting
+                if (step.transit) {
+                    const t = step.transit;
+                    directionsMessage += `${index + 1}. 🚇 **Take ${t.vehicle} ${t.line}** (${t.headsign})\n`;
+                    directionsMessage += `   • Board at: ${t.departure.stop} (${t.departure.time})\n`;
+                    directionsMessage += `   • Exit at: ${t.arrival.stop} (${t.arrival.time})\n`;
+                    directionsMessage += `   • ${t.numStops} stops, ${step.duration}\n\n`;
+                } else {
+                    // Regular step
+                    directionsMessage += `${index + 1}. ${step.instruction}\n`;
+                    directionsMessage += `   📏 ${step.distance} • ⏱️ ${step.duration}\n\n`;
+                }
+            });
+
+            // Add warnings if any
+            if (route.warnings && route.warnings.length > 0) {
+                directionsMessage += `\n⚠️ **Warnings:**\n`;
+                route.warnings.forEach(warning => {
+                    directionsMessage += `• ${warning}\n`;
+                });
+            }
+
+            // Add tips based on mode
+            directionsMessage += `\n💡 **Tips:**\n`;
+            if (selectedMode === 'transit') {
+                directionsMessage += `• Check real-time schedules as times may vary\n`;
+                directionsMessage += `• Download offline maps for areas with poor signal\n`;
+            } else if (selectedMode === 'walking') {
+                directionsMessage += `• Wear comfortable shoes for this journey\n`;
+                directionsMessage += `• Stay hydrated, especially in warm weather\n`;
+            } else if (selectedMode === 'driving') {
+                directionsMessage += `• Check traffic conditions before departing\n`;
+                directionsMessage += `• Consider parking availability at destination\n`;
+            }
+
+            // Add option to see other modes
+            const otherModes = validModes.filter(m => m !== selectedMode);
+            directionsMessage += `\n📱 **Try other modes:** ${otherModes.join(', ')}`;
+
+            return this.formatResponse(directionsMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error getting directions:', error);
+            return this.formatResponse(`❌ Sorry, I couldn't get directions: ${error.message}`);
         }
     }
 
