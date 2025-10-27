@@ -122,8 +122,9 @@ class BaseAgent {
             this.log(`Saved to memory: ${task.id} - ${data.title}`, 'success');
             return task;
         } catch (error) {
-            this.log(`Failed to save to memory: ${error.message}`, 'error');
-            throw error;
+            this.log(`Failed to save to memory: ${error.message}`, 'warn');
+            // Return null instead of throwing - makes Beads optional
+            return null;
         }
     }
 

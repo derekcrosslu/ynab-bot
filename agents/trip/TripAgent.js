@@ -109,21 +109,25 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             // Use Claude to generate comprehensive trip plan
             const tripPlan = await this.askClaude(prompt);
 
-            // Save trip plan to memory
-            await this.saveToMemory({
-                title: `Trip Plan: ${destination} ${dates || ''}`,
-                type: 'task',
-                priority: 2,
-                description: `Trip planning for ${destination}. Dates: ${dates || 'TBD'}. Budget: ${budget || 'TBD'}`,
-                metadata: {
-                    destination,
-                    dates,
-                    budget,
-                    travelers,
-                    preferences,
-                    status: 'planning'
-                }
-            });
+            // Try to save trip plan to memory (optional - continue if Beads not available)
+            try {
+                await this.saveToMemory({
+                    title: `Trip Plan: ${destination} ${dates || ''}`,
+                    type: 'task',
+                    priority: 2,
+                    description: `Trip planning for ${destination}. Dates: ${dates || 'TBD'}. Budget: ${budget || 'TBD'}`,
+                    metadata: {
+                        destination,
+                        dates,
+                        budget,
+                        travelers,
+                        preferences,
+                        status: 'planning'
+                    }
+                });
+            } catch (memoryError) {
+                console.log('⚠️ [TripAgent] Could not save to memory (Beads not available), continuing...');
+            }
 
             console.log('✅ [TripAgent] Trip plan created successfully');
 
@@ -275,20 +279,24 @@ Keep it realistic - don't overschedule. Use emojis for visual organization.`;
         try {
             const itinerary = await this.askClaude(prompt);
 
-            // Save itinerary to memory
-            await this.saveToMemory({
-                title: `Itinerary: ${destination} (${duration})`,
-                type: 'task',
-                priority: 2,
-                description: `Day-by-day itinerary for ${destination}`,
-                metadata: {
-                    destination,
-                    duration,
-                    interests,
-                    pace,
-                    type: 'itinerary'
-                }
-            });
+            // Try to save itinerary to memory (optional - continue if Beads not available)
+            try {
+                await this.saveToMemory({
+                    title: `Itinerary: ${destination} (${duration})`,
+                    type: 'task',
+                    priority: 2,
+                    description: `Day-by-day itinerary for ${destination}`,
+                    metadata: {
+                        destination,
+                        duration,
+                        interests,
+                        pace,
+                        type: 'itinerary'
+                    }
+                });
+            } catch (memoryError) {
+                console.log('⚠️ [TripAgent] Could not save itinerary to memory (Beads not available), continuing...');
+            }
 
             console.log('✅ [TripAgent] Itinerary created successfully');
 
@@ -309,20 +317,24 @@ Keep it realistic - don't overschedule. Use emojis for visual organization.`;
         const { type, confirmation, details, cost, date } = params;
 
         try {
-            // Save booking to Beads memory
-            await this.saveToMemory({
-                title: `Booking: ${type} - ${confirmation || 'No confirmation'}`,
-                type: 'task',
-                priority: 1,
-                description: details || 'Travel booking',
-                metadata: {
-                    bookingType: type,
-                    confirmation,
-                    cost,
-                    date,
-                    status: 'confirmed'
-                }
-            });
+            // Try to save booking to Beads memory (optional - continue if not available)
+            try {
+                await this.saveToMemory({
+                    title: `Booking: ${type} - ${confirmation || 'No confirmation'}`,
+                    type: 'task',
+                    priority: 1,
+                    description: details || 'Travel booking',
+                    metadata: {
+                        bookingType: type,
+                        confirmation,
+                        cost,
+                        date,
+                        status: 'confirmed'
+                    }
+                });
+            } catch (memoryError) {
+                console.log('⚠️ [TripAgent] Could not save booking to memory (Beads not available), continuing...');
+            }
 
             // If cost provided and budgetAgent available, suggest adding to YNAB
             let budgetSuggestion = '';
