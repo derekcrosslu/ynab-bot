@@ -28,8 +28,8 @@ class Orchestrator {
         // Track user's trip context (planning, active-trip, post-trip)
         this.userTripContext = new Map();
 
-        // Track user's last active context (for context continuity)
-        this.userLastContext = new Map(); // userId -> { agent: 'budget|trip', timestamp: Date, action: 'view_balance|get_directions|etc' }
+        // Track user's last active context (for context continuity and parameter reuse)
+        this.userLastContext = new Map(); // userId -> { agent: 'budget|trip', timestamp: Date, action: 'view_balance|get_directions|etc', params: {to: 'JFK', mode: 'walking', etc} }
 
         // Initialize agents
         this.agents = {
@@ -323,13 +323,14 @@ ${modeDescription}
 
             const result = await agent.handleRequest(agentRequest, context);
 
-            // Update user's last context (for future context continuity)
+            // Update user's last context (for future context continuity and parameter reuse)
             this.userLastContext.set(userId, {
                 agent: intent.agent,
                 action: intent.action,
+                params: intent.params || {}, // Store params for follow-up questions
                 timestamp: Date.now()
             });
-            console.log(`📝 Updated last context for ${userId}: ${intent.agent} (${intent.action})`);
+            console.log(`📝 Updated last context for ${userId}: ${intent.agent} (${intent.action}) with params:`, JSON.stringify(intent.params || {}));
 
             // Format and return response
             return {
@@ -363,6 +364,7 @@ ${modeDescription}
             const lastContext = userId ? this.userLastContext.get(userId) : null;
             const lastAgent = lastContext?.agent || 'none';
             const lastAction = lastContext?.action || 'none';
+            const lastParams = lastContext?.params || {};
 
             const prompt = `Analyze this user message and determine their intent.
 
@@ -377,8 +379,25 @@ User location: ${context.userLocation ? 'User has shared their location (use for
 
 IMPORTANT - CONTEXT CONTINUITY:
 User's last action was: ${lastAgent} agent (${lastAction})
-GIVE PRIORITY to staying in the same context (${lastAgent}) UNLESS the message CLEARLY indicates a different intent.
-If the message is ambiguous or could belong to either context, PREFER ${lastAgent} agent.
+Previous parameters: ${JSON.stringify(lastParams)}
+
+RULES FOR FOLLOW-UP QUESTIONS:
+1. If user asks a FOLLOW-UP question (like "show me", "what about walking?", "how about driving?"), REUSE parameters from previous turn
+2. GIVE PRIORITY to staying in the same agent (${lastAgent}) and action (${lastAction}) UNLESS message CLEARLY indicates different intent
+3. For ambiguous messages, PREFER continuing same conversation with modified parameters
+4. Only switch to different agent/action if confidence is >0.9 (very clear intent change)
+
+PARAMETER REUSE EXAMPLES:
+If previous turn was get_directions with {to: "parque kennedy", mode: "walking"}:
+- "show me" → SAME action, SAME params {to: "parque kennedy", mode: "walking"}
+- "what about driving?" → SAME action, UPDATE {to: "parque kennedy", mode: "driving"}
+- "how do I get there by car?" → SAME action, UPDATE {to: "parque kennedy", mode: "driving"}
+- "and to central park?" → SAME action, UPDATE {to: "central park", mode: "walking"}
+
+If previous turn was search_flights with {from: "LAX", to: "NYC", dates: "Dec 11"}:
+- "show me" → SAME action, SAME params
+- "what about Dec 15?" → SAME action, UPDATE {from: "LAX", to: "NYC", dates: "Dec 15"}
+- "from Miami instead" → SAME action, UPDATE {from: "Miami", to: "NYC", dates: "Dec 11"}
 
 Return a JSON object with:
 {
