@@ -2132,6 +2132,63 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
     }
 
     /**
+     * Use AI to validate that locations are actually in the destination
+     * @param {Array<string>} locations - Locations to validate
+     * @param {string} destination - Destination city/region
+     * @returns {Array<string>} Filtered locations
+     */
+    async aiValidateLocations(locations, destination) {
+        try {
+            const validatePrompt = `You are validating locations for a trip to ${destination}.
+
+Locations to validate:
+${JSON.stringify(locations, null, 2)}
+
+For each location, determine if it is ACTUALLY located in or near ${destination}.
+
+Return a JSON array containing ONLY the locations that are truly in ${destination}.
+Remove any locations from other cities or countries.
+
+Example: If destination is "New York" and locations include "Oscar R. Benavides" (which is in Lima, Peru), EXCLUDE it.
+
+Return ONLY the JSON array, nothing else.`;
+
+            const response = await this.anthropic.messages.create({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 300,
+                messages: [{
+                    role: 'user',
+                    content: validatePrompt
+                }]
+            });
+
+            const validatedText = response.content[0].text.trim();
+            const jsonMatch = validatedText.match(/\[.*\]/s);
+
+            if (jsonMatch) {
+                const validated = JSON.parse(jsonMatch[0]);
+                console.log(`✅ [TripAgent] AI validation: ${locations.length} → ${validated.length} locations`);
+
+                // Log any filtered locations
+                const filtered = locations.filter(loc => !validated.includes(loc));
+                if (filtered.length > 0) {
+                    console.log(`🚫 [TripAgent] AI filtered out: ${filtered.join(', ')}`);
+                }
+
+                return validated;
+            }
+
+            // If validation fails, return original
+            return locations;
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error in AI validation:', error);
+            // If AI validation fails, return original locations
+            return locations;
+        }
+    }
+
+    /**
      * Extract key locations from trip plan text using Claude
      */
     async extractLocationsFromTripPlan(tripPlan, destination) {
@@ -2171,6 +2228,11 @@ CRITICAL REQUIREMENTS:
 
                 // Validate locations - filter out any that seem unrelated to destination
                 locations = this.validateLocationsForDestination(locations, destination);
+
+                // Additional AI-based validation to double-check
+                if (locations.length > 1) {
+                    locations = await this.aiValidateLocations(locations, destination);
+                }
 
                 // Ensure destination is first
                 if (locations.length === 0 || !locations[0].toLowerCase().includes(destination.toLowerCase())) {
