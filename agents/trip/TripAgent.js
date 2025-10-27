@@ -253,6 +253,18 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             return this.formatResponse('❌ I need both departure and destination airports to search flights.\n\nExample: "search flights from LAX to NRT"');
         }
 
+        // Parse origin and destination to IATA codes
+        const originCode = this.parseCityCode(from);
+        const destinationCode = this.parseCityCode(to);
+
+        if (!originCode) {
+            return this.formatResponse(`❌ I couldn't find the airport code for "${from}".\n\nPlease use:\n• City names (e.g., "Lima", "New York")\n• Airport codes (e.g., "LIM", "JFK")`);
+        }
+
+        if (!destinationCode) {
+            return this.formatResponse(`❌ I couldn't find the airport code for "${to}".\n\nPlease use:\n• City names (e.g., "Lima", "New York")\n• Airport codes (e.g., "LIM", "JFK")`);
+        }
+
         // Parse dates - could be "Dec 11" or "Dec 11-21" or "2025-12-11" or "2025-12-11 to 2025-12-21"
         let departureDate, returnDate;
 
@@ -275,12 +287,12 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             }
 
             // Log search parameters
-            console.log(`🔍 [TripAgent] Searching flights: ${from} → ${to}, Depart: ${departureDate}${returnDate ? `, Return: ${returnDate}` : ''}`);
+            console.log(`🔍 [TripAgent] Searching flights: ${originCode} → ${destinationCode}, Depart: ${departureDate}${returnDate ? `, Return: ${returnDate}` : ''}`);
 
             // Call Amadeus flight search
             const searchResult = await this.amadeus.searchFlights({
-                origin: from.toUpperCase(),
-                destination: to.toUpperCase(),
+                origin: originCode,
+                destination: destinationCode,
                 departureDate: departureDate,
                 returnDate: returnDate,
                 adults: passengers || 1,
@@ -313,7 +325,7 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             }
 
             if (!searchResult.offers || searchResult.offers.length === 0) {
-                return this.formatResponse(`❌ No flights found for ${from} → ${to} on ${departureDate}${returnDate ? ` (return ${returnDate})` : ''}\n\n💡 Try different dates or nearby airports.`);
+                return this.formatResponse(`❌ No flights found for ${originCode} → ${destinationCode} on ${departureDate}${returnDate ? ` (return ${returnDate})` : ''}\n\n💡 Try different dates or nearby airports.`);
             }
 
             // Store search results in context for booking
