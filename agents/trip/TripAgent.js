@@ -1048,6 +1048,11 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
                 directionsMessage += `🛣️ **Route:** ${route.summary}\n`;
             }
 
+            // Generate Google Maps link for mobile navigation
+            const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(startLocation)}&destination=${encodeURIComponent(endLocation)}&travelmode=${selectedMode}`;
+            directionsMessage += `\n📱 **Open in Google Maps:**\n${mapsUrl}\n`;
+            directionsMessage += `   ↳ Tap link for turn-by-turn navigation\n`;
+
             directionsMessage += `\n**STEP-BY-STEP DIRECTIONS:**\n\n`;
 
             // Add each step
