@@ -360,8 +360,35 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             console.log(`💰 [TripAgent] Price constraint applied: max ${priceConstraint.maxPrice} ${priceConstraint.currency}`);
         }
 
-        // TODO: Use priceConstraint with Sky-Scrapper API when calling this.skyscrapper.searchFlights()
-        // For now, it's displayed in the response and logged for debugging
+        // Try Sky-Scrapper API first (if initialized and has price constraint)
+        let skyscrapperResults = '';
+        if (this.skyscrapper && this.skyscrapper.initialized && priceConstraint) {
+            try {
+                console.log('🛩️ [TripAgent] Attempting Sky-Scrapper flight search with price filter...');
+
+                const skyResult = await this.skyscrapper.searchFlights({
+                    origin: originCode,
+                    destination: destinationCode,
+                    departureDate: departureDate,
+                    returnDate: returnDate,
+                    adults: passengers || 1,
+                    travelClass: flightClass || 'economy',
+                    maxPrice: priceConstraint.maxPrice,
+                    currency: priceConstraint.currency,
+                    maxResults: 5
+                });
+
+                if (skyResult.success && skyResult.offers && skyResult.offers.length > 0) {
+                    skyscrapperResults = this.skyscrapper.formatFlightOffersForDisplay(skyResult);
+                    console.log(`✅ [TripAgent] Found ${skyResult.offers.length} flights from Sky-Scrapper under ${priceConstraint.currency} ${priceConstraint.maxPrice}`);
+                } else {
+                    console.log(`⚠️ [TripAgent] Sky-Scrapper returned no results: ${skyResult.error || 'No flights found'}`);
+                }
+            } catch (skyError) {
+                console.log('⚠️ [TripAgent] Sky-Scrapper search failed:', skyError.message);
+                // Continue with fallback options
+            }
+        }
 
         // Generate Google Flights link (always works, all airlines)
         const googleFlightsUrl = this.generateGoogleFlightsLink({
@@ -456,14 +483,27 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             response += `💰 Max price: ${priceConstraint.currency} ${priceConstraint.maxPrice.toLocaleString()}\n`;
         }
 
-        response += `\n🔍 **Search on Google Flights** (All airlines, best prices):\n`;
-        response += `${googleFlightsUrl}\n`;
+        response += `\n`;
 
-        if (amadeusSampleResults) {
-            response += `\n\n📊 **Sample Results** (limited availability):${amadeusSampleResults}`;
-            response += `\n\n💡 *For complete results with ALL airlines (American, Delta, United, etc.), use the Google Flights link above.*`;
-        } else {
-            response += `\n\n💡 *Tap the link above to see all available flights from all airlines.*`;
+        // Show Sky-Scrapper results first (if available with price filter)
+        if (skyscrapperResults) {
+            response += skyscrapperResults;
+            response += `\n📌 **More Options:**\n`;
+            response += `${googleFlightsUrl}\n`;
+            response += `\n💡 *Flights above are filtered by price. Use the Google Flights link for more options.*`;
+        }
+        // Otherwise, show Google Flights link as primary
+        else {
+            response += `🔍 **Search on Google Flights** (All airlines, best prices):\n`;
+            response += `${googleFlightsUrl}\n`;
+
+            // Show Amadeus sample results if available (and no Sky-Scrapper results)
+            if (amadeusSampleResults) {
+                response += `\n\n📊 **Sample Results** (limited availability):${amadeusSampleResults}`;
+                response += `\n\n💡 *For complete results with ALL airlines (American, Delta, United, etc.), use the Google Flights link above.*`;
+            } else {
+                response += `\n\n💡 *Tap the link above to see all available flights from all airlines.*`;
+            }
         }
 
         return this.formatResponse(response);
