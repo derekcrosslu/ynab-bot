@@ -208,7 +208,12 @@ class TripAgent extends BaseAgent {
         const { destination, dates, budget, preferences, travelers } = params;
 
         // Build comprehensive trip planning prompt
-        const prompt = `You are a professional travel planner. Create a comprehensive trip plan with the following details:
+        const prompt = `You are a professional travel planner. Create a comprehensive trip plan EXCLUSIVELY for the destination specified below.
+
+**CRITICAL: This trip is ONLY for ${destination}**
+- Do NOT mention other destinations or cities
+- Do NOT include locations from previous trips or other countries
+- ONLY focus on ${destination} and its immediate surroundings
 
 **Trip Details:**
 - Destination: ${destination || 'Not specified'}
@@ -218,18 +223,20 @@ class TripAgent extends BaseAgent {
 - Preferences: ${preferences || 'None specified'}
 
 Please provide:
-1. **Overview**: Brief destination overview and why it's great for this trip
+1. **Overview**: Brief overview of ${destination} and why it's great for this trip
 2. **Best time to visit**: Weather and seasonal considerations for the dates
 3. **Estimated budget breakdown**:
    - Flights (estimate)
    - Accommodation (per night estimate)
    - Daily expenses (food, transport, activities)
    - Total trip estimate
-4. **Accommodation recommendations**: 3 hotel/Airbnb suggestions with different price ranges
-5. **Must-see attractions**: Top 5-7 things to do/see
-6. **Local tips**: Transportation, food, safety, cultural considerations
-7. **Suggested itinerary**: High-level day-by-day plan
+4. **Accommodation recommendations**: 3 hotel/Airbnb suggestions with different price ranges IN ${destination}
+5. **Must-see attractions**: Top 5-7 things to do/see IN ${destination} ONLY
+6. **Local tips**: Transportation, food, safety, cultural considerations for ${destination}
+7. **Suggested itinerary**: High-level day-by-day plan for ${destination}
 8. **Next steps**: What to book first, what to research
+
+REMEMBER: ALL recommendations must be for ${destination} only. Do not mention locations from other cities or countries.
 
 Format the response in a clear, organized way with emojis for visual appeal.`;
 
