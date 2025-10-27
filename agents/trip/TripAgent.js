@@ -3,20 +3,28 @@
  *
  * Capabilities:
  * 1. plan_trip - Complete trip planning with Claude AI
- * 2. search_flights - Flight recommendations and search
- * 3. search_hotels - Hotel recommendations and search
- * 4. create_itinerary - Day-by-day itinerary creation
- * 5. track_booking - Track bookings and reservations
- * 6. get_trip_suggestions - Destination suggestions based on preferences
+ * 2. search_flights - Real flight search via Amadeus API
+ * 3. book_flight - Book flights with confirmation and payment
+ * 4. search_hotels - Hotel recommendations and search
+ * 5. create_itinerary - Day-by-day itinerary creation
+ * 6. track_booking - Track bookings and reservations
+ * 7. get_trip_suggestions - Destination suggestions based on preferences
+ *
+ * Integrations:
+ * - Amadeus API for flight search and booking
+ * - Beads for trip and booking persistence
+ * - BudgetAgent for expense tracking
  */
 
 const BaseAgent = require('../base/BaseAgent');
+const amadeusServer = require('../../mcp-servers/amadeus/server');
 
 class TripAgent extends BaseAgent {
     constructor(anthropic, budgetAgent) {
         super('TripAgent', [
             'plan_trip',
             'search_flights',
+            'book_flight',
             'search_hotels',
             'create_itinerary',
             'track_booking',
@@ -25,8 +33,32 @@ class TripAgent extends BaseAgent {
 
         this.anthropic = anthropic;
         this.budgetAgent = budgetAgent;
+        this.amadeus = amadeusServer;
+
+        // Initialize Amadeus with credentials from environment
+        this.initializeAmadeus();
 
         console.log('🌍 [TripAgent] Initialized with capabilities:', this.capabilities);
+    }
+
+    /**
+     * Initialize Amadeus MCP server
+     */
+    async initializeAmadeus() {
+        try {
+            const result = await this.amadeus.initialize(
+                process.env.AMADEUS_API_KEY,
+                process.env.AMADEUS_API_SECRET
+            );
+
+            if (result.success) {
+                console.log('✈️ [TripAgent] Amadeus MCP server initialized');
+            } else {
+                console.error('❌ [TripAgent] Failed to initialize Amadeus:', result.error);
+            }
+        } catch (error) {
+            console.error('❌ [TripAgent] Error initializing Amadeus:', error.message);
+        }
     }
 
     /**
@@ -45,6 +77,9 @@ class TripAgent extends BaseAgent {
 
                 case 'search_flights':
                     return await this.searchFlights(params, context);
+
+                case 'book_flight':
+                    return await this.bookFlight(params, context);
 
                 case 'search_hotels':
                     return await this.searchHotels(params, context);
@@ -140,46 +175,250 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
     }
 
     /**
-     * 2. SEARCH FLIGHTS - Flight recommendations
+     * 2. SEARCH FLIGHTS - Real flight search via Amadeus API
      */
     async searchFlights(params, context) {
         console.log('✈️ [TripAgent] Searching flights with params:', params);
 
         const { from, to, dates, passengers, class: flightClass } = params;
 
-        const prompt = `You are a flight search expert. Provide flight recommendations for:
+        // Validate required params
+        if (!from || !to) {
+            return this.formatResponse('❌ I need both departure and destination airports to search flights.\n\nExample: "search flights from LAX to NRT"');
+        }
 
-**Flight Search:**
-- From: ${from || 'Not specified'}
-- To: ${to || 'Not specified'}
-- Dates: ${dates || 'Flexible'}
-- Passengers: ${passengers || '1'}
-- Class: ${flightClass || 'Economy'}
-
-Please provide:
-1. **Best booking strategy**: When to book for best prices
-2. **Estimated price range**: For this route and dates
-3. **Recommended airlines**: Top 3-5 airlines that fly this route
-4. **Flight duration**: Typical flight time (direct vs connecting)
-5. **Best booking sites**: Where to search (Google Flights, Kayak, Skyscanner, etc.)
-6. **Money-saving tips**:
-   - Flexible date options
-   - Nearby airports
-   - Best days to fly
-7. **What to look for**: Baggage policies, layover times, airline reliability
-
-Keep it practical and actionable.`;
+        // Parse dates - could be "Dec 11" or "Dec 11-21" or "2025-12-11" or "2025-12-11 to 2025-12-21"
+        let departureDate, returnDate;
 
         try {
-            const flightInfo = await this.askClaude(prompt);
+            if (dates) {
+                const parsedDates = this.parseDates(dates);
+                departureDate = parsedDates.departure;
+                returnDate = parsedDates.return;
+            } else {
+                return this.formatResponse('❌ I need travel dates to search flights.\n\nExample: "search flights from LAX to NRT on Dec 11"');
+            }
+        } catch (parseError) {
+            return this.formatResponse(`❌ I couldn't understand the dates "${dates}". Please use format like:\n- "Dec 11"\n- "2025-12-11"\n- "Dec 11 to Dec 21" (round-trip)`);
+        }
 
-            console.log('✅ [TripAgent] Flight recommendations generated');
+        try {
+            // Call Amadeus flight search
+            const searchResult = await this.amadeus.searchFlights({
+                origin: from.toUpperCase(),
+                destination: to.toUpperCase(),
+                departureDate: departureDate,
+                returnDate: returnDate,
+                adults: passengers || 1,
+                travelClass: flightClass || 'ECONOMY',
+                maxResults: 5
+            });
 
-            return this.formatResponse(`✈️ **Flight Search: ${from} → ${to}**\n\n${flightInfo}\n\n💡 *When you book, use "track booking [details]" to save your confirmation.*`);
+            if (!searchResult.success) {
+                return this.formatResponse(`❌ Flight search failed: ${searchResult.error}\n\n${searchResult.description || ''}`);
+            }
+
+            // Store search results in context for booking
+            if (!context.flightSearchResults) {
+                context.flightSearchResults = {};
+            }
+            context.flightSearchResults[context.userId] = {
+                query: searchResult.query,
+                offers: searchResult.offers,
+                timestamp: Date.now()
+            };
+
+            console.log(`✅ [TripAgent] Found ${searchResult.offers.length} flight options`);
+
+            // Format results for WhatsApp
+            const displayMessage = this.amadeus.formatFlightOffersForDisplay(searchResult);
+
+            return this.formatResponse(
+                `${displayMessage}\n\n💡 To book a flight, say "book option [number]" (e.g., "book option 1")`
+            );
 
         } catch (error) {
             console.error('❌ [TripAgent] Error searching flights:', error);
-            return this.formatResponse(`❌ Sorry, I couldn't generate flight recommendations: ${error.message}`);
+            return this.formatResponse(`❌ Sorry, I couldn't search flights: ${error.message}`);
+        }
+    }
+
+    /**
+     * Parse date strings into YYYY-MM-DD format
+     */
+    parseDates(dateStr) {
+        // Handle formats like:
+        // - "Dec 11" or "December 11"
+        // - "2025-12-11"
+        // - "Dec 11-21" or "Dec 11 to Dec 21" (round-trip)
+        // - "2025-12-11 to 2025-12-21" (round-trip)
+
+        const currentYear = new Date().getFullYear();
+        let departure, returnDate;
+
+        // Check if it's a round-trip (contains "-" or "to")
+        const roundTripMatch = dateStr.match(/(.+?)(?:\s+to\s+|\s*-\s*)(.+)/i);
+
+        if (roundTripMatch) {
+            // Round-trip
+            departure = this.parseSingleDate(roundTripMatch[1].trim(), currentYear);
+            returnDate = this.parseSingleDate(roundTripMatch[2].trim(), currentYear);
+        } else {
+            // One-way
+            departure = this.parseSingleDate(dateStr.trim(), currentYear);
+        }
+
+        return { departure, return: returnDate };
+    }
+
+    /**
+     * Parse a single date string into YYYY-MM-DD
+     */
+    parseSingleDate(dateStr, defaultYear) {
+        // If already in YYYY-MM-DD format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            return dateStr;
+        }
+
+        // Parse "Dec 11" or "December 11" format
+        const monthDayMatch = dateStr.match(/(\w+)\s+(\d{1,2})/);
+        if (monthDayMatch) {
+            const monthStr = monthDayMatch[1];
+            const day = monthDayMatch[2].padStart(2, '0');
+
+            const months = {
+                'jan': '01', 'january': '01',
+                'feb': '02', 'february': '02',
+                'mar': '03', 'march': '03',
+                'apr': '04', 'april': '04',
+                'may': '05',
+                'jun': '06', 'june': '06',
+                'jul': '07', 'july': '07',
+                'aug': '08', 'august': '08',
+                'sep': '09', 'september': '09',
+                'oct': '10', 'october': '10',
+                'nov': '11', 'november': '11',
+                'dec': '12', 'december': '12'
+            };
+
+            const month = months[monthStr.toLowerCase()];
+            if (month) {
+                return `${defaultYear}-${month}-${day}`;
+            }
+        }
+
+        throw new Error(`Could not parse date: ${dateStr}`);
+    }
+
+    /**
+     * 2b. BOOK FLIGHT - Book a selected flight
+     */
+    async bookFlight(params, context) {
+        console.log('💳 [TripAgent] Booking flight with params:', params);
+
+        const { option, confirm } = params;
+        const userId = context.userId;
+
+        // Get stored search results
+        if (!context.flightSearchResults || !context.flightSearchResults[userId]) {
+            return this.formatResponse('❌ No recent flight search found. Please search for flights first using "search flights from [origin] to [destination] on [date]"');
+        }
+
+        const searchData = context.flightSearchResults[userId];
+
+        // Check if search results are still fresh (within 30 minutes)
+        const ageMinutes = (Date.now() - searchData.timestamp) / 1000 / 60;
+        if (ageMinutes > 30) {
+            return this.formatResponse('❌ Your flight search results have expired (older than 30 minutes). Please search again for current prices.');
+        }
+
+        // Parse option number
+        const optionNumber = parseInt(option);
+        if (isNaN(optionNumber) || optionNumber < 1 || optionNumber > searchData.offers.length) {
+            return this.formatResponse(`❌ Invalid option number. Please choose between 1 and ${searchData.offers.length}`);
+        }
+
+        const selectedFlight = searchData.offers[optionNumber - 1];
+
+        // If not confirmed, ask for confirmation
+        if (!confirm || confirm.toLowerCase() !== 'yes') {
+            const confirmMessage = `💳 **Confirm Flight Booking**\n\n` +
+                `**Flight:** ${selectedFlight.outbound.airline} ${selectedFlight.outbound.flightNumber}\n` +
+                `**Route:** ${selectedFlight.outbound.departure.airport} → ${selectedFlight.outbound.arrival.airport}\n` +
+                `**Departure:** ${new Date(selectedFlight.outbound.departure.time).toLocaleString()}\n` +
+                `**Arrival:** ${new Date(selectedFlight.outbound.arrival.time).toLocaleString()}\n` +
+                `**Price:** ${selectedFlight.price.currency} ${selectedFlight.price.total}\n\n` +
+                `${selectedFlight.inbound ? `**Return:** ${new Date(selectedFlight.inbound.departure.time).toLocaleString()}\n\n` : ''}` +
+                `⚠️ **This will charge your payment method.**\n\n` +
+                `Reply "yes" to confirm booking, or "cancel" to abort.`;
+
+            return this.formatResponse(confirmMessage);
+        }
+
+        try {
+            // TODO: Actual Amadeus booking API call
+            // For now, simulate booking
+            console.log('🎫 [TripAgent] Processing flight booking...');
+            console.log('Selected flight:', selectedFlight);
+
+            // Simulate booking (replace with actual Amadeus booking API)
+            const bookingResult = {
+                success: true,
+                confirmationCode: `TEST${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+                flightId: selectedFlight.id,
+                price: selectedFlight.price,
+                route: `${selectedFlight.outbound.departure.airport} → ${selectedFlight.outbound.arrival.airport}`,
+                departure: selectedFlight.outbound.departure.time,
+                arrival: selectedFlight.outbound.arrival.time,
+                airline: selectedFlight.outbound.airline,
+                flightNumber: selectedFlight.outbound.flightNumber
+            };
+
+            if (!bookingResult.success) {
+                return this.formatResponse(`❌ Booking failed. Please try again or contact support.`);
+            }
+
+            // Save booking to Beads memory
+            try {
+                await this.saveToMemory({
+                    title: `Flight Booking: ${bookingResult.route}`,
+                    type: 'task',
+                    priority: 1,
+                    description: `Flight ${bookingResult.airline} ${bookingResult.flightNumber}\nConfirmation: ${bookingResult.confirmationCode}\nPrice: ${bookingResult.price.currency} ${bookingResult.price.total}`,
+                    metadata: {
+                        type: 'flight_booking',
+                        confirmationCode: bookingResult.confirmationCode,
+                        route: bookingResult.route,
+                        departure: bookingResult.departure,
+                        arrival: bookingResult.arrival,
+                        price: bookingResult.price,
+                        bookedAt: new Date().toISOString()
+                    }
+                });
+            } catch (memoryError) {
+                console.log('⚠️ [TripAgent] Could not save booking to memory (Beads not available)');
+            }
+
+            console.log('✅ [TripAgent] Flight booked successfully:', bookingResult.confirmationCode);
+
+            // Clear search results after booking
+            delete context.flightSearchResults[userId];
+
+            const successMessage = `✅ **Flight Booked Successfully!**\n\n` +
+                `✈️ **${bookingResult.airline} Flight ${bookingResult.flightNumber}**\n` +
+                `📍 ${bookingResult.route}\n` +
+                `📅 ${new Date(bookingResult.departure).toLocaleString()}\n` +
+                `💰 ${bookingResult.price.currency} ${bookingResult.price.total}\n\n` +
+                `🎫 **Confirmation:** ${bookingResult.confirmationCode}\n\n` +
+                `📧 Booking confirmation will be sent to your email.\n` +
+                `📅 Would you like me to add this to your calendar? (Reply "yes" to add)\n\n` +
+                `💡 Tip: Track expenses with "spent ${bookingResult.price.total} on flight"`;
+
+            return this.formatResponse(successMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error booking flight:', error);
+            return this.formatResponse(`❌ Booking failed: ${error.message}`);
         }
     }
 

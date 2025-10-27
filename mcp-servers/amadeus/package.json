@@ -1,0 +1,21 @@
+{
+  "name": "amadeus-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server for Amadeus flight search and booking",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "amadeus": "^8.0.0"
+  },
+  "keywords": [
+    "amadeus",
+    "flights",
+    "mcp",
+    "travel"
+  ],
+  "author": "",
+  "license": "MIT"
+}

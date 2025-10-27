@@ -22,6 +22,12 @@ class Orchestrator {
         // Initialize Beads memory system
         this.beads = new BeadsIntegration(process.cwd());
 
+        // Track user's preferred agent (budget or trip)
+        this.userAgentPreferences = new Map();
+
+        // Track user's trip context (planning, active-trip, post-trip)
+        this.userTripContext = new Map();
+
         // Initialize agents
         this.agents = {
             budget: new BudgetAgent(anthropic, ynabService),
@@ -60,8 +66,191 @@ class Orchestrator {
         try {
             console.log(`🎯 Orchestrator handling request from ${userId}:`, request.message?.substring(0, 50));
 
-            // Parse intent from user message
-            const intent = await this.parseIntent(request.message, request.context);
+            const messageText = request.message?.toLowerCase().trim() || '';
+
+            // === AGENT MODE SWITCH COMMANDS ===
+
+            // General planning mode
+            if (messageText === '/planning') {
+                this.userAgentPreferences.set(userId, 'trip');
+                this.userTripContext.set(userId, 'planning');
+                console.log(`📋 ${userId} switched to GENERAL PLANNING mode`);
+
+                return {
+                    message: `📋 **Planning Mode Activated**
+
+🎯 Ready to help you plan anything!
+🌍 Currently optimized for trip planning
+
+**What you can ask:**
+• "plan trip to Paris in March"
+• "suggest destinations for summer"
+• "help me plan my vacation"
+• "show me budget for Tokyo trip"
+
+**Other modes:**
+• \`/tripplanning\` → Trip planning mode
+• \`/ontrip\` → Active travel mode (when traveling)
+• \`/budget\` → Budget mode`,
+                    agent: 'system',
+                    handled: true
+                };
+            }
+
+            // Trip planning mode (pre-trip)
+            if (messageText === '/trip' ||
+                messageText === '/tripplanning' ||
+                messageText === '/tipplanning' ||  // common typo
+                messageText === '/travel') {
+                this.userAgentPreferences.set(userId, 'trip');
+                this.userTripContext.set(userId, 'pre-trip');
+                console.log(`✈️ ${userId} switched to TRIP PLANNING mode (pre-trip)`);
+
+                return {
+                    message: `✈️ **Trip Planning Mode Activated**
+
+🗺️ Planning your next adventure!
+📅 Use this mode BEFORE your trip
+
+**What you can ask:**
+• "plan trip to NYC Dec 11-21"
+• "suggest beach destinations"
+• "search flights from LAX to Tokyo"
+• "find hotels in Paris for 5 nights"
+• "create 7-day itinerary for Rome"
+
+**Other modes:**
+• \`/ontrip\` → Switch when you start traveling
+• \`/budget\` → Budget mode
+• \`/agentmode\` → Check current mode`,
+                    agent: 'system',
+                    handled: true
+                };
+            }
+
+            // Active trip mode (currently traveling)
+            if (messageText === '/ontrip' ||
+                messageText === '/traveling' ||
+                messageText === '/intrip' ||
+                messageText === '/activetrip') {
+                this.userAgentPreferences.set(userId, 'trip');
+                this.userTripContext.set(userId, 'active-trip');
+                console.log(`🧳 ${userId} switched to ACTIVE TRIP mode (traveling now)`);
+
+                return {
+                    message: `🧳 **Active Trip Mode**
+
+✈️ You're traveling! Have a great trip!
+📍 Real-time travel assistance
+
+**What you can ask:**
+• "track expense: dinner $50"
+• "track booking: Hotel confirmation ABC123"
+• "what should I do today?"
+• "find restaurants nearby"
+• "update my itinerary"
+
+💰 Expenses will auto-suggest adding to YNAB budget
+
+**Other modes:**
+• \`/tripplanning\` → Back to planning mode
+• \`/budget\` → Budget mode
+• \`/agentmode\` → Check current mode`,
+                    agent: 'system',
+                    handled: true
+                };
+            }
+
+            if (messageText === '/budget' || messageText === '/budgeting') {
+                this.userAgentPreferences.set(userId, 'budget');
+                console.log(`💰 ${userId} switched to BUDGET agent mode`);
+
+                return {
+                    message: `💰 **Budget Mode Activated**
+
+📊 All your messages will now go to the Budget Agent
+💳 Ask about balances, transactions, spending analysis
+
+**What you can ask:**
+• "show me my balance"
+• "add $50 expense at Starbucks"
+• "analyze my spending"
+• "categorize pending transactions"
+• "show recent transactions"
+
+💡 Type \`/trip\` to switch to Trip Planning Agent
+💡 Type \`/agentmode\` to check current agent`,
+                    agent: 'system',
+                    handled: true
+                };
+            }
+
+            if (messageText === '/agentmode') {
+                const currentAgent = this.userAgentPreferences.get(userId) || 'auto';
+                const tripContext = this.userTripContext.get(userId);
+
+                let emoji, modeName, modeDescription;
+
+                if (currentAgent === 'trip') {
+                    if (tripContext === 'active-trip') {
+                        emoji = '🧳';
+                        modeName = 'Active Trip (Traveling)';
+                        modeDescription = 'Real-time travel assistance while you\'re on your trip';
+                    } else if (tripContext === 'pre-trip') {
+                        emoji = '✈️';
+                        modeName = 'Trip Planning (Pre-Trip)';
+                        modeDescription = 'Planning your next trip - flights, hotels, itineraries';
+                    } else {
+                        emoji = '📋';
+                        modeName = 'General Planning';
+                        modeDescription = 'Planning mode - currently optimized for trips';
+                    }
+                } else if (currentAgent === 'budget') {
+                    emoji = '💰';
+                    modeName = 'Budget Mode';
+                    modeDescription = 'YNAB budget management, transactions, spending analysis';
+                } else {
+                    emoji = '🤖';
+                    modeName = 'Auto-detect';
+                    modeDescription = 'Automatically choosing the right agent based on your message';
+                }
+
+                return {
+                    message: `${emoji} **Current Mode**: ${modeName}
+
+${modeDescription}
+
+**Available Modes:**
+• \`/planning\` → General planning
+• \`/tripplanning\` or \`/trip\` → Trip planning (pre-trip)
+• \`/ontrip\` → Active travel mode (when traveling)
+• \`/budget\` → Budget management
+
+💡 Type \`/budgetok\` to switch to legacy mode`,
+                    agent: 'system',
+                    handled: true
+                };
+            }
+
+            // === PARSE INTENT AND ROUTE ===
+
+            // Check if user has agent preference
+            const preferredAgent = this.userAgentPreferences.get(userId);
+            let intent;
+
+            if (preferredAgent && this.agents[preferredAgent]) {
+                // User has explicit preference - use that agent
+                console.log(`🎯 Using preferred agent: ${preferredAgent}`);
+                intent = {
+                    agent: preferredAgent,
+                    action: this.guessActionFromMessage(request.message, preferredAgent),
+                    confidence: 1.0,
+                    params: {}
+                };
+            } else {
+                // No preference - parse intent with AI
+                intent = await this.parseIntent(request.message, request.context);
+            }
 
             console.log(`🎯 Detected intent: ${intent.action} (agent: ${intent.agent}, confidence: ${intent.confidence})`);
 
@@ -88,7 +277,8 @@ class Orchestrator {
             const context = {
                 userId: userId,
                 memory: this.beads,
-                approvalRequired: approvalRequired
+                approvalRequired: approvalRequired,
+                tripContext: this.userTripContext.get(userId) || null  // Include trip context
             };
 
             const result = await agent.handleRequest(agentRequest, context);
@@ -284,6 +474,64 @@ Respond ONLY with the JSON object, no markdown, no explanations.`;
         agent.setMemory(this.beads);
         agent.setAnthropicClient(this.anthropic);
         console.log(`✅ Added agent: ${name}`);
+    }
+
+    /**
+     * Guess the most appropriate action based on keywords in message
+     * Used when user has set a preferred agent explicitly
+     * @param {string} message - User message
+     * @param {string} agentName - Preferred agent name
+     * @returns {string} Guessed action name
+     */
+    guessActionFromMessage(message, agentName) {
+        const lowerMessage = message.toLowerCase();
+
+        if (agentName === 'trip') {
+            // Trip agent keywords
+            if (lowerMessage.includes('plan') || lowerMessage.includes('planning')) {
+                return 'plan_trip';
+            }
+            if (lowerMessage.includes('suggest') || lowerMessage.includes('recommend') || lowerMessage.includes('ideas')) {
+                return 'get_trip_suggestions';
+            }
+            if (lowerMessage.includes('flight')) {
+                return 'search_flights';
+            }
+            if (lowerMessage.includes('hotel') || lowerMessage.includes('accommodation') || lowerMessage.includes('stay')) {
+                return 'search_hotels';
+            }
+            if (lowerMessage.includes('itinerary') || lowerMessage.includes('schedule') || lowerMessage.includes('day by day')) {
+                return 'create_itinerary';
+            }
+            if (lowerMessage.includes('track') || lowerMessage.includes('booking') || lowerMessage.includes('confirmation')) {
+                return 'track_booking';
+            }
+            // Default for trip agent
+            return 'plan_trip';
+        }
+
+        if (agentName === 'budget') {
+            // Budget agent keywords
+            if (lowerMessage.includes('balance') || lowerMessage.includes('how much')) {
+                return 'view_balance';
+            }
+            if (lowerMessage.includes('add') || lowerMessage.includes('create') || lowerMessage.includes('expense')) {
+                return 'create_transaction';
+            }
+            if (lowerMessage.includes('categorize') || lowerMessage.includes('category')) {
+                return 'categorize_transactions';
+            }
+            if (lowerMessage.includes('transaction') || lowerMessage.includes('recent') || lowerMessage.includes('show')) {
+                return 'view_transactions';
+            }
+            if (lowerMessage.includes('analyz') || lowerMessage.includes('spending') || lowerMessage.includes('breakdown')) {
+                return 'analyze_spending';
+            }
+            // Default for budget agent
+            return 'general_query';
+        }
+
+        return 'unknown';
     }
 }
 
