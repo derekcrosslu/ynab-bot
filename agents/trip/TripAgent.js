@@ -269,6 +269,14 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
         }
 
         try {
+            // Check Amadeus initialization
+            if (!this.amadeus.initialized) {
+                return this.formatResponse(`❌ Flight search unavailable. Amadeus API not initialized.\n\n💡 Contact support if this persists.`);
+            }
+
+            // Log search parameters
+            console.log(`🔍 [TripAgent] Searching flights: ${from} → ${to}, Depart: ${departureDate}${returnDate ? `, Return: ${returnDate}` : ''}`);
+
             // Call Amadeus flight search
             const searchResult = await this.amadeus.searchFlights({
                 origin: from.toUpperCase(),
@@ -280,8 +288,21 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
                 maxResults: 5
             });
 
+            // Log result for debugging
+            console.log(`📊 [TripAgent] Flight search result:`, {
+                success: searchResult.success,
+                error: searchResult.error,
+                offersCount: searchResult.offers?.length || 0
+            });
+
             if (!searchResult.success) {
-                return this.formatResponse(`❌ Flight search failed: ${searchResult.error}\n\n${searchResult.description || ''}`);
+                const errorMsg = searchResult.error || 'Unknown error';
+                const descMsg = searchResult.description ? `\n\n${searchResult.description}` : '';
+                return this.formatResponse(`❌ Flight search failed: ${errorMsg}${descMsg}`);
+            }
+
+            if (!searchResult.offers || searchResult.offers.length === 0) {
+                return this.formatResponse(`❌ No flights found for ${from} → ${to} on ${departureDate}${returnDate ? ` (return ${returnDate})` : ''}\n\n💡 Try different dates or nearby airports.`);
             }
 
             // Store search results in context for booking
@@ -299,13 +320,20 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             // Format results for WhatsApp
             const displayMessage = this.amadeus.formatFlightOffersForDisplay(searchResult);
 
+            // Ensure displayMessage is a string
+            if (typeof displayMessage !== 'string') {
+                console.error('❌ [TripAgent] formatFlightOffersForDisplay returned non-string:', typeof displayMessage, displayMessage);
+                return this.formatResponse(`❌ Error formatting flight results. Please try again.`);
+            }
+
             return this.formatResponse(
                 `${displayMessage}\n\n💡 To book a flight, say "book option [number]" (e.g., "book option 1")`
             );
 
         } catch (error) {
             console.error('❌ [TripAgent] Error searching flights:', error);
-            return this.formatResponse(`❌ Sorry, I couldn't search flights: ${error.message}`);
+            const errorMessage = error.message || error.toString() || 'Unknown error occurred';
+            return this.formatResponse(`❌ Sorry, I couldn't search flights: ${errorMessage}`);
         }
     }
 

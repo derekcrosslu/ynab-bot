@@ -48,7 +48,10 @@ class AmadeusMCPServer {
      */
     async searchFlights(params) {
         if (!this.initialized) {
-            return { error: 'Amadeus not initialized. Call initialize() first.' };
+            return {
+                success: false,
+                error: 'Amadeus not initialized. Call initialize() first.'
+            };
         }
 
         try {
@@ -146,11 +149,21 @@ class AmadeusMCPServer {
             };
 
         } catch (error) {
-            console.error('❌ Flight search failed:', error.message);
+            console.error('❌ Flight search failed:', error);
+
+            // Extract error message with fallback
+            const errorMessage = error.message || error.toString() || 'Unknown error occurred';
+            const errorDescription = error.description || error.response?.data?.errors?.[0]?.detail || '';
+
+            // Log full error for debugging
+            if (error.response?.data) {
+                console.error('Amadeus API error response:', JSON.stringify(error.response.data, null, 2));
+            }
+
             return {
                 success: false,
-                error: error.message,
-                description: error.description || 'Unknown error'
+                error: errorMessage,
+                description: errorDescription
             };
         }
     }
@@ -258,7 +271,10 @@ class AmadeusMCPServer {
      */
     async searchHotels(params) {
         if (!this.initialized) {
-            return { error: 'Amadeus not initialized. Call initialize() first.' };
+            return {
+                success: false,
+                error: 'Amadeus not initialized. Call initialize() first.'
+            };
         }
 
         try {
@@ -367,11 +383,21 @@ class AmadeusMCPServer {
             };
 
         } catch (error) {
-            console.error('❌ Hotel search failed:', error.message);
+            console.error('❌ Hotel search failed:', error);
+
+            // Extract error message with fallback
+            const errorMessage = error.message || error.toString() || 'Unknown error occurred';
+            const errorDescription = error.description || error.response?.data?.errors?.[0]?.detail || '';
+
+            // Log full error for debugging
+            if (error.response?.data) {
+                console.error('Amadeus API error response:', JSON.stringify(error.response.data, null, 2));
+            }
+
             return {
                 success: false,
-                error: error.message,
-                description: error.description || 'Unknown error'
+                error: errorMessage,
+                description: errorDescription
             };
         }
     }
