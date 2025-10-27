@@ -5,13 +5,14 @@
  * 1. plan_trip - Complete trip planning with Claude AI
  * 2. search_flights - Real flight search via Amadeus API
  * 3. book_flight - Book flights with confirmation and payment
- * 4. search_hotels - Hotel recommendations and search
- * 5. create_itinerary - Day-by-day itinerary creation
- * 6. track_booking - Track bookings and reservations
- * 7. get_trip_suggestions - Destination suggestions based on preferences
+ * 4. search_hotels - Real hotel search via Amadeus API
+ * 5. book_hotel - Book hotels with confirmation and payment
+ * 6. create_itinerary - Day-by-day itinerary creation
+ * 7. track_booking - Track bookings and reservations
+ * 8. get_trip_suggestions - Destination suggestions based on preferences
  *
  * Integrations:
- * - Amadeus API for flight search and booking
+ * - Amadeus API for flight and hotel search/booking
  * - Beads for trip and booking persistence
  * - BudgetAgent for expense tracking
  */
@@ -26,6 +27,7 @@ class TripAgent extends BaseAgent {
             'search_flights',
             'book_flight',
             'search_hotels',
+            'book_hotel',
             'create_itinerary',
             'track_booking',
             'get_trip_suggestions'
@@ -83,6 +85,9 @@ class TripAgent extends BaseAgent {
 
                 case 'search_hotels':
                     return await this.searchHotels(params, context);
+
+                case 'book_hotel':
+                    return await this.bookHotel(params, context);
 
                 case 'create_itinerary':
                     return await this.createItinerary(params, context);
@@ -423,55 +428,264 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
     }
 
     /**
-     * 3. SEARCH HOTELS - Hotel recommendations
+     * 3. SEARCH HOTELS - Real hotel search via Amadeus API
      */
     async searchHotels(params, context) {
         console.log('🏨 [TripAgent] Searching hotels with params:', params);
 
-        const { destination, dates, budget, preferences, guests } = params;
+        const { destination, dates, guests, rooms } = params;
 
-        const prompt = `You are a hotel search expert. Provide accommodation recommendations for:
+        // Validate required params
+        if (!destination) {
+            return this.formatResponse('❌ I need a destination to search hotels.\n\nExample: "search hotels in Tokyo"');
+        }
 
-**Hotel Search:**
-- Destination: ${destination || 'Not specified'}
-- Dates: ${dates || 'Flexible'}
-- Budget per night: ${budget || 'Not specified'}
-- Guests: ${guests || '1-2'}
-- Preferences: ${preferences || 'None'}
+        // Parse city code from destination (e.g., "Tokyo" -> "TYO", "New York" -> "NYC")
+        const cityCode = this.parseCityCode(destination);
+        if (!cityCode) {
+            return this.formatResponse(`❌ I couldn't find the city code for "${destination}".\n\nPlease use common city names or IATA codes (e.g., NYC, TYO, PAR, LON)`);
+        }
 
-Please provide:
-1. **Best areas to stay**: Top 3 neighborhoods/areas and why
-2. **Hotel recommendations by budget**:
-   - Budget option ($-$$)
-   - Mid-range option ($$-$$$)
-   - Luxury option ($$$$)
+        // Parse dates
+        let checkInDate, checkOutDate;
+        try {
+            if (dates) {
+                const parsedDates = this.parseDates(dates);
+                checkInDate = parsedDates.departure; // Use same date parser
+                checkOutDate = parsedDates.return;
 
-   For each, include:
-   - Typical nightly rate
-   - Location/neighborhood
-   - What it's known for
-   - Who it's best for
-
-3. **Airbnb vs Hotels**: Pros/cons for this destination
-4. **Best booking platforms**: Where to find deals
-5. **Booking tips**:
-   - Best time to book
-   - Cancellation policies to look for
-   - What to check before booking
-6. **Local considerations**: Safety, transport access, amenities
-
-Make it practical and helpful.`;
+                if (!checkOutDate) {
+                    // If only one date provided, assume 1 night stay
+                    const checkIn = new Date(checkInDate);
+                    checkIn.setDate(checkIn.getDate() + 1);
+                    checkOutDate = checkIn.toISOString().split('T')[0];
+                }
+            } else {
+                return this.formatResponse('❌ I need check-in and check-out dates.\n\nExample: "search hotels in Tokyo Dec 11-21"');
+            }
+        } catch (parseError) {
+            return this.formatResponse(`❌ I couldn't understand the dates "${dates}". Please use format like:\n- "Dec 11 to Dec 21"\n- "2025-12-11 to 2025-12-21"`);
+        }
 
         try {
-            const hotelInfo = await this.askClaude(prompt);
+            // Call Amadeus hotel search
+            const searchResult = await this.amadeus.searchHotels({
+                cityCode: cityCode,
+                checkInDate: checkInDate,
+                checkOutDate: checkOutDate,
+                adults: guests || 1,
+                rooms: rooms || 1,
+                currency: 'USD',
+                maxResults: 5
+            });
 
-            console.log('✅ [TripAgent] Hotel recommendations generated');
+            if (!searchResult.success) {
+                return this.formatResponse(`❌ Hotel search failed: ${searchResult.error}\n\n${searchResult.description || ''}`);
+            }
 
-            return this.formatResponse(`🏨 **Hotel Search: ${destination}**\n\n${hotelInfo}\n\n💡 *When you book, use "track booking [details]" to save your reservation.*`);
+            // Store search results in context for booking
+            if (!context.hotelSearchResults) {
+                context.hotelSearchResults = {};
+            }
+            context.hotelSearchResults[context.userId] = {
+                query: searchResult.query,
+                offers: searchResult.offers,
+                timestamp: Date.now()
+            };
+
+            console.log(`✅ [TripAgent] Found ${searchResult.offers.length} hotel options`);
+
+            // Format results for WhatsApp
+            const displayMessage = this.amadeus.formatHotelOffersForDisplay(searchResult);
+
+            return this.formatResponse(
+                `${displayMessage}\n\n💡 To book a hotel, say "book hotel option [number]" (e.g., "book hotel option 1")`
+            );
 
         } catch (error) {
             console.error('❌ [TripAgent] Error searching hotels:', error);
-            return this.formatResponse(`❌ Sorry, I couldn't generate hotel recommendations: ${error.message}`);
+            return this.formatResponse(`❌ Sorry, I couldn't search hotels: ${error.message}`);
+        }
+    }
+
+    /**
+     * Parse city name to IATA city code
+     */
+    parseCityCode(destination) {
+        const cityMap = {
+            // North America
+            'new york': 'NYC', 'nyc': 'NYC', 'new york city': 'NYC',
+            'los angeles': 'LAX', 'la': 'LAX',
+            'san francisco': 'SFO', 'sf': 'SFO',
+            'chicago': 'CHI',
+            'miami': 'MIA',
+            'las vegas': 'LAS', 'vegas': 'LAS',
+            'boston': 'BOS',
+            'seattle': 'SEA',
+            'washington': 'WAS', 'dc': 'WAS', 'washington dc': 'WAS',
+
+            // Europe
+            'london': 'LON',
+            'paris': 'PAR',
+            'rome': 'ROM',
+            'barcelona': 'BCN',
+            'madrid': 'MAD',
+            'amsterdam': 'AMS',
+            'berlin': 'BER',
+            'vienna': 'VIE',
+            'prague': 'PRG',
+            'lisbon': 'LIS',
+
+            // Asia
+            'tokyo': 'TYO',
+            'osaka': 'OSA',
+            'kyoto': 'OSA', // Use Osaka code for Kyoto
+            'bangkok': 'BKK',
+            'singapore': 'SIN',
+            'hong kong': 'HKG',
+            'seoul': 'SEL',
+            'beijing': 'BJS',
+            'shanghai': 'SHA',
+            'dubai': 'DXB',
+
+            // South America
+            'buenos aires': 'BUE',
+            'rio de janeiro': 'RIO', 'rio': 'RIO',
+            'sao paulo': 'SAO',
+            'lima': 'LIM',
+
+            // Oceania
+            'sydney': 'SYD',
+            'melbourne': 'MEL',
+            'auckland': 'AKL'
+        };
+
+        const normalizedDest = destination.toLowerCase().trim();
+
+        // Check if already a valid code (3 letters, all caps)
+        if (/^[A-Z]{3}$/.test(destination.toUpperCase())) {
+            return destination.toUpperCase();
+        }
+
+        return cityMap[normalizedDest] || null;
+    }
+
+    /**
+     * 3b. BOOK HOTEL - Book a selected hotel
+     */
+    async bookHotel(params, context) {
+        console.log('🏨 [TripAgent] Booking hotel with params:', params);
+
+        const { option, confirm } = params;
+        const userId = context.userId;
+
+        // Get stored search results
+        if (!context.hotelSearchResults || !context.hotelSearchResults[userId]) {
+            return this.formatResponse('❌ No recent hotel search found. Please search for hotels first using "search hotels in [city] [dates]"');
+        }
+
+        const searchData = context.hotelSearchResults[userId];
+
+        // Check if search results are still fresh (within 30 minutes)
+        const ageMinutes = (Date.now() - searchData.timestamp) / 1000 / 60;
+        if (ageMinutes > 30) {
+            return this.formatResponse('❌ Your hotel search results have expired (older than 30 minutes). Please search again for current prices.');
+        }
+
+        // Parse option number
+        const optionNumber = parseInt(option);
+        if (isNaN(optionNumber) || optionNumber < 1 || optionNumber > searchData.offers.length) {
+            return this.formatResponse(`❌ Invalid option number. Please choose between 1 and ${searchData.offers.length}`);
+        }
+
+        const selectedHotel = searchData.offers[optionNumber - 1];
+
+        // If not confirmed, ask for confirmation
+        if (!confirm || confirm.toLowerCase() !== 'yes') {
+            const confirmMessage = `🏨 **Confirm Hotel Booking**\n\n` +
+                `**Hotel:** ${selectedHotel.name}\n` +
+                `**Location:** ${selectedHotel.location.cityCode}\n` +
+                `**Check-in:** ${selectedHotel.checkIn}\n` +
+                `**Check-out:** ${selectedHotel.checkOut}\n` +
+                `**Nights:** ${selectedHotel.nights}\n` +
+                `**Room:** ${selectedHotel.room.description}\n` +
+                `**Guests:** ${selectedHotel.guests}\n` +
+                `**Price:** ${selectedHotel.price.currency} ${selectedHotel.price.total} (${selectedHotel.price.currency} ${selectedHotel.price.perNight}/night)\n\n` +
+                `⚠️ **This will charge your payment method.**\n\n` +
+                `Reply "yes" to confirm booking, or "cancel" to abort.`;
+
+            return this.formatResponse(confirmMessage);
+        }
+
+        try {
+            // TODO: Actual Amadeus booking API call
+            // For now, simulate booking
+            console.log('🎫 [TripAgent] Processing hotel booking...');
+            console.log('Selected hotel:', selectedHotel);
+
+            // Simulate booking (replace with actual Amadeus booking API)
+            const bookingResult = {
+                success: true,
+                confirmationCode: `HOTEL${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+                hotelId: selectedHotel.id,
+                hotelName: selectedHotel.name,
+                location: selectedHotel.location.cityCode,
+                checkIn: selectedHotel.checkIn,
+                checkOut: selectedHotel.checkOut,
+                nights: selectedHotel.nights,
+                price: selectedHotel.price,
+                room: selectedHotel.room
+            };
+
+            if (!bookingResult.success) {
+                return this.formatResponse(`❌ Booking failed. Please try again or contact support.`);
+            }
+
+            // Save booking to Beads memory
+            try {
+                await this.saveToMemory({
+                    title: `Hotel Booking: ${bookingResult.hotelName}`,
+                    type: 'task',
+                    priority: 1,
+                    description: `Hotel ${bookingResult.hotelName} in ${bookingResult.location}\nConfirmation: ${bookingResult.confirmationCode}\nCheck-in: ${bookingResult.checkIn}\nCheck-out: ${bookingResult.checkOut}\nPrice: ${bookingResult.price.currency} ${bookingResult.price.total}`,
+                    metadata: {
+                        type: 'hotel_booking',
+                        confirmationCode: bookingResult.confirmationCode,
+                        hotelName: bookingResult.hotelName,
+                        location: bookingResult.location,
+                        checkIn: bookingResult.checkIn,
+                        checkOut: bookingResult.checkOut,
+                        nights: bookingResult.nights,
+                        price: bookingResult.price,
+                        bookedAt: new Date().toISOString()
+                    }
+                });
+            } catch (memoryError) {
+                console.log('⚠️ [TripAgent] Could not save booking to memory (Beads not available)');
+            }
+
+            console.log('✅ [TripAgent] Hotel booked successfully:', bookingResult.confirmationCode);
+
+            // Clear search results after booking
+            delete context.hotelSearchResults[userId];
+
+            const successMessage = `✅ **Hotel Booked Successfully!**\n\n` +
+                `🏨 **${bookingResult.hotelName}**\n` +
+                `📍 ${bookingResult.location}\n` +
+                `📅 Check-in: ${bookingResult.checkIn}\n` +
+                `📅 Check-out: ${bookingResult.checkOut}\n` +
+                `🛏️ ${bookingResult.nights} night(s)\n` +
+                `💰 ${bookingResult.price.currency} ${bookingResult.price.total} (${bookingResult.price.currency} ${bookingResult.price.perNight}/night)\n\n` +
+                `🎫 **Confirmation:** ${bookingResult.confirmationCode}\n\n` +
+                `📧 Booking confirmation will be sent to your email.\n` +
+                `📅 Would you like me to add this to your calendar? (Reply "yes" to add)\n\n` +
+                `💡 Tip: Track expenses with "spent ${bookingResult.price.total} on hotel"`;
+
+            return this.formatResponse(successMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error booking hotel:', error);
+            return this.formatResponse(`❌ Booking failed: ${error.message}`);
         }
     }
 

@@ -244,6 +244,191 @@ class AmadeusMCPServer {
 
         return message;
     }
+
+    /**
+     * Search for hotels
+     * @param {Object} params
+     * @param {string} params.cityCode - IATA city code (e.g., NYC, PAR, TYO)
+     * @param {string} params.checkInDate - Check-in date (YYYY-MM-DD)
+     * @param {string} params.checkOutDate - Check-out date (YYYY-MM-DD)
+     * @param {number} params.adults - Number of adult guests (default: 1)
+     * @param {number} params.rooms - Number of rooms (default: 1)
+     * @param {string} params.currency - Currency code (default: USD)
+     * @param {number} params.maxResults - Max number of results (default: 5)
+     */
+    async searchHotels(params) {
+        if (!this.initialized) {
+            return { error: 'Amadeus not initialized. Call initialize() first.' };
+        }
+
+        try {
+            const {
+                cityCode,
+                checkInDate,
+                checkOutDate,
+                adults = 1,
+                rooms = 1,
+                currency = 'USD',
+                maxResults = 5
+            } = params;
+
+            console.log(`🔍 Searching hotels in ${cityCode} (${checkInDate} to ${checkOutDate})`);
+
+            // Step 1: Search for hotels by city
+            const hotelListResponse = await this.amadeus.referenceData.locations.hotels.byCity.get({
+                cityCode: cityCode
+            });
+
+            if (!hotelListResponse.data || hotelListResponse.data.length === 0) {
+                return {
+                    success: false,
+                    error: `No hotels found in ${cityCode}`
+                };
+            }
+
+            // Get hotel IDs (limit to maxResults * 2 to have options after filtering)
+            const hotelIds = hotelListResponse.data
+                .slice(0, maxResults * 2)
+                .map(hotel => hotel.hotelId)
+                .join(',');
+
+            // Step 2: Get hotel offers (pricing and availability)
+            const offersResponse = await this.amadeus.shopping.hotelOffersSearch.get({
+                hotelIds: hotelIds,
+                checkInDate: checkInDate,
+                checkOutDate: checkOutDate,
+                adults: adults,
+                roomQuantity: rooms,
+                currency: currency
+            });
+
+            if (!offersResponse.data || offersResponse.data.length === 0) {
+                return {
+                    success: false,
+                    error: `No available hotels found for ${checkInDate} to ${checkOutDate}`
+                };
+            }
+
+            // Parse and format results
+            const offers = offersResponse.data.slice(0, maxResults).map((hotelOffer, index) => {
+                const hotel = hotelOffer.hotel;
+                const offer = hotelOffer.offers[0]; // Get cheapest offer
+
+                // Calculate total nights
+                const checkIn = new Date(checkInDate);
+                const checkOut = new Date(checkOutDate);
+                const nights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+
+                return {
+                    id: hotel.hotelId,
+                    index: index + 1,
+                    name: hotel.name,
+                    location: {
+                        address: hotel.address || {},
+                        cityCode: cityCode,
+                        latitude: hotel.latitude,
+                        longitude: hotel.longitude
+                    },
+                    rating: hotel.rating || 'Not rated',
+                    checkIn: checkInDate,
+                    checkOut: checkOutDate,
+                    nights: nights,
+                    guests: adults,
+                    rooms: rooms,
+                    price: {
+                        total: offer.price.total,
+                        currency: offer.price.currency,
+                        perNight: (parseFloat(offer.price.total) / nights).toFixed(2)
+                    },
+                    room: {
+                        type: offer.room.type,
+                        description: offer.room.typeEstimated?.category || 'Standard room',
+                        beds: offer.room.typeEstimated?.beds || 1,
+                        bedType: offer.room.typeEstimated?.bedType || 'Unknown'
+                    },
+                    available: offer.available,
+                    offerId: offer.id
+                };
+            });
+
+            console.log(`✅ Found ${offers.length} hotel options`);
+
+            return {
+                success: true,
+                query: {
+                    cityCode,
+                    checkInDate,
+                    checkOutDate,
+                    adults,
+                    rooms,
+                    nights: offers[0]?.nights || 0
+                },
+                offers: offers
+            };
+
+        } catch (error) {
+            console.error('❌ Hotel search failed:', error.message);
+            return {
+                success: false,
+                error: error.message,
+                description: error.description || 'Unknown error'
+            };
+        }
+    }
+
+    /**
+     * Get specific hotel offer details
+     */
+    async getHotelOffer(offerId) {
+        if (!this.initialized) {
+            return { error: 'Amadeus not initialized' };
+        }
+
+        try {
+            const response = await this.amadeus.shopping.hotelOffer(offerId).get();
+
+            return {
+                success: true,
+                offer: response.data
+            };
+        } catch (error) {
+            console.error('❌ Failed to get hotel offer:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Format hotel offers for display
+     */
+    formatHotelOffersForDisplay(searchResult) {
+        if (!searchResult.success) {
+            return `❌ Search failed: ${searchResult.error}`;
+        }
+
+        const { query, offers } = searchResult;
+
+        let message = `🏨 **Hotels in ${query.cityCode}**\n\n`;
+        message += `📅 Check-in: ${query.checkInDate}\n`;
+        message += `📅 Check-out: ${query.checkOutDate}\n`;
+        message += `🛏️ ${query.nights} night(s), ${query.rooms} room(s), ${query.adults} guest(s)\n\n`;
+
+        if (offers.length === 0) {
+            return message + '❌ No hotels found';
+        }
+
+        message += `**${offers.length} Options:**\n\n`;
+
+        offers.forEach(offer => {
+            message += `**${offer.index}. ${offer.name}** ${offer.rating !== 'Not rated' ? `⭐ ${offer.rating}` : ''}\n`;
+            message += `   📍 ${offer.location.address.lines?.[0] || offer.location.cityCode}\n`;
+            message += `   💰 ${offer.price.currency} ${offer.price.total} total (${offer.price.currency} ${offer.price.perNight}/night)\n`;
+            message += `   🛏️ ${offer.room.description}\n`;
+            message += `   ${offer.available ? '✅ Available' : '❌ Not available'}\n`;
+            message += `\n`;
+        });
+
+        return message;
+    }
 }
 
 // Export singleton instance
