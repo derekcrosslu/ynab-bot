@@ -2193,9 +2193,10 @@ CRITICAL REQUIREMENTS:
     /**
      * Generate Google Maps URL with multiple waypoints
      * @param {Array<string>} locations - Array of location names
+     * @param {string} travelMode - Travel mode: 'transit', 'walking', 'bicycling', 'driving' (default: 'transit')
      * @returns {string} Google Maps URL
      */
-    generateGoogleMapsMultiStopURL(locations) {
+    generateGoogleMapsMultiStopURL(locations, travelMode = 'transit') {
         if (!locations || locations.length === 0) {
             return null;
         }
@@ -2206,10 +2207,14 @@ CRITICAL REQUIREMENTS:
             return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
         }
 
-        // Multi-stop route
-        // Format: /dir/location1/location2/location3/...
+        // Multi-stop route with travel mode
+        // Format: /dir/location1/location2/location3/?travelmode=transit
         const encodedLocations = locations.map(loc => encodeURIComponent(loc));
-        return `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
+        const baseUrl = `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
+
+        // Add travel mode parameter
+        // Options: transit (public transport), walking, bicycling, driving
+        return `${baseUrl}?travelmode=${travelMode}`;
     }
 
     /**
