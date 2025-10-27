@@ -194,8 +194,22 @@ Currently using legacy mode.
         }
       );
 
+      // Ensure response is a string
+      let responseMessage = agentResponse.message || agentResponse.response || 'No response from agent';
+
+      if (typeof responseMessage !== 'string') {
+        console.error('❌ Agent returned non-string response:', typeof responseMessage, responseMessage);
+        if (Array.isArray(responseMessage)) {
+          responseMessage = responseMessage.join('\n');
+        } else if (typeof responseMessage === 'object') {
+          responseMessage = JSON.stringify(responseMessage, null, 2);
+        } else {
+          responseMessage = String(responseMessage);
+        }
+      }
+
       return {
-        response: agentResponse.message || agentResponse.response,
+        response: responseMessage,
         mode: 'multi-agent',
         handled: true,
         tasks: agentResponse.tasks || [] // Beads task IDs if any

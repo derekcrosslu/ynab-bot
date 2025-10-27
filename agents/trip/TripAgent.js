@@ -296,7 +296,18 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             });
 
             if (!searchResult.success) {
-                const errorMsg = searchResult.error || 'Unknown error';
+                // Ensure error is a string (might be an object)
+                let errorMsg = 'Unknown error';
+                if (searchResult.error) {
+                    if (typeof searchResult.error === 'string') {
+                        errorMsg = searchResult.error;
+                    } else if (typeof searchResult.error === 'object') {
+                        errorMsg = searchResult.error.message || JSON.stringify(searchResult.error);
+                    } else {
+                        errorMsg = String(searchResult.error);
+                    }
+                }
+
                 const descMsg = searchResult.description ? `\n\n${searchResult.description}` : '';
                 return this.formatResponse(`❌ Flight search failed: ${errorMsg}${descMsg}`);
             }
