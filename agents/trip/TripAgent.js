@@ -241,7 +241,7 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
     }
 
     /**
-     * 2. SEARCH FLIGHTS - Real flight search via Amadeus API
+     * 2. SEARCH FLIGHTS - Google Flights deep link + optional Amadeus sample results
      */
     async searchFlights(params, context) {
         console.log('✈️ [TripAgent] Searching flights with params:', params);
@@ -265,7 +265,7 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             return this.formatResponse(`❌ I couldn't find the airport code for "${to}".\n\nPlease use:\n• City names (e.g., "Lima", "New York")\n• Airport codes (e.g., "LIM", "JFK")`);
         }
 
-        // Parse dates - could be "Dec 11" or "Dec 11-21" or "2025-12-11" or "2025-12-11 to 2025-12-21"
+        // Parse dates
         let departureDate, returnDate;
 
         try {
@@ -280,130 +280,147 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             return this.formatResponse(`❌ I couldn't understand the dates "${dates}". Please use format like:\n- "Dec 11"\n- "2025-12-11"\n- "Dec 11 to Dec 21" (round-trip)`);
         }
 
+        // Generate Google Flights link (always works, all airlines)
+        const googleFlightsUrl = this.generateGoogleFlightsLink({
+            from: originCode,
+            to: destinationCode,
+            departureDate,
+            returnDate,
+            passengers: passengers || 1,
+            travelClass: flightClass
+        });
+
+        // Log search parameters
+        console.log(`🔍 [TripAgent] Searching flights: ${originCode} → ${destinationCode}, Depart: ${departureDate}${returnDate ? `, Return: ${returnDate}` : ''}`);
+        console.log(`🔗 [TripAgent] Google Flights URL: ${googleFlightsUrl}`);
+
+        // Try to get sample results from Amadeus (optional, may have limited data)
+        let amadeusSampleResults = '';
+
         try {
-            // Check Amadeus initialization
-            if (!this.amadeus.initialized) {
-                return this.formatResponse(`❌ Flight search unavailable. Amadeus API not initialized.\n\n💡 Contact support if this persists.`);
-            }
+            if (this.amadeus && this.amadeus.initialized) {
+                const searchResult = await this.amadeus.searchFlights({
+                    origin: originCode,
+                    destination: destinationCode,
+                    departureDate: departureDate,
+                    returnDate: returnDate,
+                    adults: passengers || 1,
+                    travelClass: flightClass || 'ECONOMY',
+                    maxResults: 5
+                });
 
-            // Log search parameters
-            console.log(`🔍 [TripAgent] Searching flights: ${originCode} → ${destinationCode}, Depart: ${departureDate}${returnDate ? `, Return: ${returnDate}` : ''}`);
+                if (searchResult.success && searchResult.offers && searchResult.offers.length > 0) {
+                    // Filter by airline preferences if specified
+                    let filteredOffers = searchResult.offers;
 
-            // Call Amadeus flight search
-            const searchResult = await this.amadeus.searchFlights({
-                origin: originCode,
-                destination: destinationCode,
-                departureDate: departureDate,
-                returnDate: returnDate,
-                adults: passengers || 1,
-                travelClass: flightClass || 'ECONOMY',
-                maxResults: 5
-            });
+                    if (exclude && exclude.length > 0) {
+                        filteredOffers = filteredOffers.filter(offer => {
+                            const airlineCode = offer.outbound.airline;
+                            const airlineName = this.amadeus.getAirlineName(airlineCode);
+                            return !this.airlineMatches(airlineCode, airlineName, exclude);
+                        });
+                    }
 
-            // Log result for debugging
-            console.log(`📊 [TripAgent] Flight search result:`, {
-                success: searchResult.success,
-                error: searchResult.error,
-                offersCount: searchResult.offers?.length || 0
-            });
+                    if (only && only.length > 0) {
+                        filteredOffers = filteredOffers.filter(offer => {
+                            const airlineCode = offer.outbound.airline;
+                            const airlineName = this.amadeus.getAirlineName(airlineCode);
+                            return this.airlineMatches(airlineCode, airlineName, only);
+                        });
+                    }
 
-            if (!searchResult.success) {
-                // Ensure error is a string (might be an object)
-                let errorMsg = 'Unknown error';
-                if (searchResult.error) {
-                    if (typeof searchResult.error === 'string') {
-                        errorMsg = searchResult.error;
-                    } else if (typeof searchResult.error === 'object') {
-                        errorMsg = searchResult.error.message || JSON.stringify(searchResult.error);
-                    } else {
-                        errorMsg = String(searchResult.error);
+                    if (prefer && prefer.length > 0) {
+                        filteredOffers.sort((a, b) => {
+                            const aCode = a.outbound.airline;
+                            const aName = this.amadeus.getAirlineName(aCode);
+                            const bCode = b.outbound.airline;
+                            const bName = this.amadeus.getAirlineName(bCode);
+                            const aPreferred = this.airlineMatches(aCode, aName, prefer);
+                            const bPreferred = this.airlineMatches(bCode, bName, prefer);
+                            if (aPreferred && !bPreferred) return -1;
+                            if (!aPreferred && bPreferred) return 1;
+                            return 0;
+                        });
+                    }
+
+                    if (filteredOffers.length > 0) {
+                        searchResult.offers = filteredOffers;
+                        const sampleDisplay = this.amadeus.formatFlightOffersForDisplay(searchResult);
+                        if (typeof sampleDisplay === 'string') {
+                            amadeusSampleResults = '\n\n' + sampleDisplay;
+                            console.log(`✅ [TripAgent] Found ${filteredOffers.length} sample results from Amadeus`);
+                        }
                     }
                 }
-
-                const descMsg = searchResult.description ? `\n\n${searchResult.description}` : '';
-                return this.formatResponse(`❌ Flight search failed: ${errorMsg}${descMsg}`);
             }
-
-            if (!searchResult.offers || searchResult.offers.length === 0) {
-                return this.formatResponse(`❌ No flights found for ${originCode} → ${destinationCode} on ${departureDate}${returnDate ? ` (return ${returnDate})` : ''}\n\n💡 Try different dates or nearby airports.`);
-            }
-
-            // Filter by airline preferences
-            let filteredOffers = searchResult.offers;
-            const originalCount = filteredOffers.length;
-
-            if (exclude && exclude.length > 0) {
-                filteredOffers = filteredOffers.filter(offer => {
-                    const airlineCode = offer.outbound.airline;
-                    const airlineName = this.amadeus.getAirlineName(airlineCode);
-                    return !this.airlineMatches(airlineCode, airlineName, exclude);
-                });
-                console.log(`🚫 [TripAgent] Excluded airlines: ${exclude.join(', ')} - ${originalCount - filteredOffers.length} flights filtered`);
-            }
-
-            if (only && only.length > 0) {
-                filteredOffers = filteredOffers.filter(offer => {
-                    const airlineCode = offer.outbound.airline;
-                    const airlineName = this.amadeus.getAirlineName(airlineCode);
-                    return this.airlineMatches(airlineCode, airlineName, only);
-                });
-                console.log(`✅ [TripAgent] Only airlines: ${only.join(', ')} - ${filteredOffers.length} flights match`);
-            }
-
-            if (prefer && prefer.length > 0) {
-                // Sort preferred airlines to the top
-                filteredOffers.sort((a, b) => {
-                    const aCode = a.outbound.airline;
-                    const aName = this.amadeus.getAirlineName(aCode);
-                    const bCode = b.outbound.airline;
-                    const bName = this.amadeus.getAirlineName(bCode);
-                    const aPreferred = this.airlineMatches(aCode, aName, prefer);
-                    const bPreferred = this.airlineMatches(bCode, bName, prefer);
-                    if (aPreferred && !bPreferred) return -1;
-                    if (!aPreferred && bPreferred) return 1;
-                    return 0;
-                });
-                console.log(`⭐ [TripAgent] Preferred airlines: ${prefer.join(', ')} - sorted to top`);
-            }
-
-            if (filteredOffers.length === 0) {
-                const filterMsg = exclude ? `excluding ${exclude.join(', ')}` : only ? `matching ${only.join(', ')}` : '';
-                return this.formatResponse(`❌ No flights found for ${originCode} → ${destinationCode} ${filterMsg}\n\n💡 Try:\n• Different airlines\n• Different dates\n• Nearby airports`);
-            }
-
-            // Update search result with filtered offers
-            searchResult.offers = filteredOffers;
-
-            // Store search results in context for booking
-            if (!context.flightSearchResults) {
-                context.flightSearchResults = {};
-            }
-            context.flightSearchResults[context.userId] = {
-                query: searchResult.query,
-                offers: searchResult.offers,
-                timestamp: Date.now()
-            };
-
-            console.log(`✅ [TripAgent] Found ${searchResult.offers.length} flight options`);
-
-            // Format results for WhatsApp
-            const displayMessage = this.amadeus.formatFlightOffersForDisplay(searchResult);
-
-            // Ensure displayMessage is a string
-            if (typeof displayMessage !== 'string') {
-                console.error('❌ [TripAgent] formatFlightOffersForDisplay returned non-string:', typeof displayMessage, displayMessage);
-                return this.formatResponse(`❌ Error formatting flight results. Please try again.`);
-            }
-
-            return this.formatResponse(
-                `${displayMessage}\n\n💡 To book a flight, say "book option [number]" (e.g., "book option 1")`
-            );
-
-        } catch (error) {
-            console.error('❌ [TripAgent] Error searching flights:', error);
-            const errorMessage = error.message || error.toString() || 'Unknown error occurred';
-            return this.formatResponse(`❌ Sorry, I couldn't search flights: ${errorMessage}`);
+        } catch (amadeusError) {
+            console.log('⚠️ [TripAgent] Amadeus sample results unavailable:', amadeusError.message);
+            // Continue without sample results
         }
+
+        // Format response with Google Flights link as primary option
+        const tripType = returnDate ? 'Round-trip' : 'One-way';
+        const passengerText = passengers > 1 ? `${passengers} passengers` : '1 passenger';
+        const classText = flightClass ? `, ${flightClass.toLowerCase()} class` : '';
+
+        let response = `✈️ **Flights: ${originCode} → ${destinationCode}**\n\n`;
+        response += `📅 ${tripType}\n`;
+        response += `📆 Depart: ${departureDate}${returnDate ? `\n🔄 Return: ${returnDate}` : ''}\n`;
+        response += `👥 ${passengerText}${classText}\n\n`;
+        response += `🔍 **Search on Google Flights** (All airlines, best prices):\n`;
+        response += `${googleFlightsUrl}\n`;
+
+        if (amadeusSampleResults) {
+            response += `\n\n📊 **Sample Results** (limited availability):${amadeusSampleResults}`;
+            response += `\n\n💡 *For complete results with ALL airlines (American, Delta, United, etc.), use the Google Flights link above.*`;
+        } else {
+            response += `\n\n💡 *Tap the link above to see all available flights from all airlines.*`;
+        }
+
+        return this.formatResponse(response);
+    }
+
+    /**
+     * Generate Google Flights deep link
+     * @param {Object} params - Flight search parameters
+     * @returns {string} Google Flights URL
+     */
+    generateGoogleFlightsLink({ from, to, departureDate, returnDate, passengers = 1, travelClass }) {
+        // Google Flights URL format
+        const fromEncoded = encodeURIComponent(from);
+        const toEncoded = encodeURIComponent(to);
+
+        // Build query string
+        let query = `Flights from ${from} to ${to}`;
+
+        // Add dates
+        const departFormatted = this.formatDateForGoogleFlights(departureDate);
+        query += ` on ${departFormatted}`;
+
+        if (returnDate) {
+            const returnFormatted = this.formatDateForGoogleFlights(returnDate);
+            query += ` returning ${returnFormatted}`;
+        }
+
+        // Add passengers
+        if (passengers > 1) {
+            query += ` for ${passengers} passengers`;
+        }
+
+        const queryEncoded = encodeURIComponent(query);
+
+        return `https://www.google.com/travel/flights?q=${queryEncoded}`;
+    }
+
+    /**
+     * Format date for Google Flights (e.g., "2025-12-11" -> "December 11")
+     */
+    formatDateForGoogleFlights(isoDate) {
+        const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                       'July', 'August', 'September', 'October', 'November', 'December'];
+        const [year, month, day] = isoDate.split('-');
+        const monthName = months[parseInt(month) - 1];
+        return `${monthName} ${parseInt(day)}`;
     }
 
     /**
