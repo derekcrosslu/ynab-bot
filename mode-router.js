@@ -17,7 +17,7 @@ const flowRouter = require('./flows/router');
 class ModeRouter {
   constructor() {
     this.userModes = new Map(); // Track per-user mode preference
-    this.defaultMode = process.env.DEFAULT_MODE || 'legacy'; // Start with legacy for safety
+    this.defaultMode = process.env.DEFAULT_MODE || 'multi-agent'; // Multi-agent is now default
     this.orchestrator = null; // Will be set when multi-agent is ready
 
     console.log(`📍 Mode Router initialized with default: ${this.defaultMode}`);
@@ -48,10 +48,10 @@ class ModeRouter {
         response: `🔄 **Legacy Mode Activated**
 
 ✅ Using proven budget flows (unchanged)
-📊 All existing features available
+📊 Budget features only
 🔒 Stable and battle-tested
 
-💡 Type \`/budgetnew\` to try the new multi-agent system.
+💡 Send any message to return to multi-agent mode (default).
 💡 Type \`/mode\` to check your current mode.`,
         mode: 'legacy',
         handled: true
@@ -72,18 +72,20 @@ Currently using legacy mode.
         };
       }
 
-      this.userModes.set(userId, 'multi-agent');
-      console.log(`🟢 ${userId} switched to MULTI-AGENT mode`);
+      // Remove user's preference to return to default (multi-agent)
+      this.userModes.delete(userId);
+      console.log(`🟢 ${userId} returned to DEFAULT (MULTI-AGENT) mode`);
 
       return {
-        response: `✨ **Multi-Agent Mode Activated**
+        response: `✨ **Multi-Agent Mode Active** (Default)
 
-🤖 Using new orchestrator with enhanced features
-🎯 Trip planning now available
-📧 Email monitoring enabled
-📅 Calendar integration active
+🤖 Enhanced AI orchestrator
+✈️ Flight & hotel search/booking
+🎯 Trip planning
+📅 Calendar integration
+📍 Google Maps
 
-💡 Type \`/budgetok\` to return to legacy mode.
+💡 Type \`/budgetok\` for legacy mode.
 💡 Type \`/mode\` to check your current mode.`,
         mode: 'multi-agent',
         handled: true
