@@ -316,13 +316,13 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
-- TripAgent: plan_trip, search_flights, search_hotels, create_itinerary, track_booking, get_trip_suggestions
+- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 
 Return a JSON object with:
 {
-  "agent": "budget|trip|email|calendar",
+  "agent": "budget|trip",
   "action": "specific_action_name",
   "confidence": 0.0-1.0,
   "params": {
@@ -331,11 +331,27 @@ Return a JSON object with:
 }
 
 Examples:
+**Budget:**
 - "show me my balance" → {"agent": "budget", "action": "view_balance", "confidence": 0.95, "params": {}}
 - "add $50 expense at Starbucks" → {"agent": "budget", "action": "create_transaction", "confidence": 0.90, "params": {"amount": -50, "payee": "Starbucks"}}
 - "categorize pending transactions" → {"agent": "budget", "action": "categorize_transactions", "confidence": 0.85, "params": {}}
+
+**Trip Planning:**
 - "plan trip to NYC Dec 11-21" → {"agent": "trip", "action": "plan_trip", "confidence": 0.90, "params": {"destination": "NYC", "dates": "Dec 11-21"}}
 - "suggest beach destinations" → {"agent": "trip", "action": "get_trip_suggestions", "confidence": 0.85, "params": {"interests": "beach"}}
+
+**Flight Search:**
+- "search flights from LAX to NRT on Dec 11" → {"agent": "trip", "action": "search_flights", "confidence": 0.95, "params": {"from": "LAX", "to": "NRT", "dates": "Dec 11"}}
+- "find flights LAX to Tokyo Dec 11" → {"agent": "trip", "action": "search_flights", "confidence": 0.90, "params": {"from": "LAX", "to": "Tokyo", "dates": "Dec 11"}}
+- "flights from NYC to Paris Dec 15-22" → {"agent": "trip", "action": "search_flights", "confidence": 0.95, "params": {"from": "NYC", "to": "Paris", "dates": "Dec 15-22"}}
+
+**Hotel Search:**
+- "search hotels in Tokyo Dec 11-21" → {"agent": "trip", "action": "search_hotels", "confidence": 0.95, "params": {"destination": "Tokyo", "dates": "Dec 11-21"}}
+- "find hotels in Paris for 5 nights" → {"agent": "trip", "action": "search_hotels", "confidence": 0.90, "params": {"destination": "Paris", "dates": "5 nights"}}
+
+**Booking:**
+- "book option 1" → {"agent": "trip", "action": "book_flight", "confidence": 0.95, "params": {"option": "1"}}
+- "book hotel option 2" → {"agent": "trip", "action": "book_hotel", "confidence": 0.95, "params": {"option": "2"}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 
