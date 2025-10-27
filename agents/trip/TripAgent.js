@@ -378,8 +378,24 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
 
         if (roundTripMatch) {
             // Round-trip
-            departure = this.parseSingleDate(roundTripMatch[1].trim(), currentYear);
-            returnDate = this.parseSingleDate(roundTripMatch[2].trim(), currentYear);
+            const startDateStr = roundTripMatch[1].trim();
+            const endDateStr = roundTripMatch[2].trim();
+
+            // Parse departure date
+            departure = this.parseSingleDate(startDateStr, currentYear);
+
+            // Check if end date is just a day number (e.g., "21" from "Dec 11-21")
+            if (/^\d{1,2}$/.test(endDateStr)) {
+                // Extract month from departure date and combine with end day
+                // departure format is YYYY-MM-DD
+                const departureMonth = departure.substring(5, 7); // Extract MM
+                const departureYear = departure.substring(0, 4);  // Extract YYYY
+                const endDay = endDateStr.padStart(2, '0');
+                returnDate = `${departureYear}-${departureMonth}-${endDay}`;
+            } else {
+                // Full date provided for return
+                returnDate = this.parseSingleDate(endDateStr, currentYear);
+            }
         } else {
             // One-way
             departure = this.parseSingleDate(dateStr.trim(), currentYear);
