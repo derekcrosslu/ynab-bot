@@ -23,6 +23,7 @@
 const BaseAgent = require('../base/BaseAgent');
 const amadeusServer = require('../../mcp-servers/amadeus/server');
 const googleServer = require('../../mcp-servers/google/server');
+const SkyscrapperServer = require('../../mcp-servers/skyscrapper/server');
 
 class TripAgent extends BaseAgent {
     constructor(anthropic, budgetAgent) {
@@ -48,10 +49,12 @@ class TripAgent extends BaseAgent {
         this.budgetAgent = budgetAgent;
         this.amadeus = amadeusServer;
         this.google = googleServer;
+        this.skyscrapper = new SkyscrapperServer();
 
-        // Initialize Amadeus and Google with credentials from environment
+        // Initialize APIs with credentials from environment
         this.initializeAmadeus();
         this.initializeGoogle();
+        this.initializeSkyscrapper();
 
         console.log('🌍 [TripAgent] Initialized with capabilities:', this.capabilities);
     }
@@ -100,6 +103,30 @@ class TripAgent extends BaseAgent {
             }
         } catch (error) {
             console.error('❌ [TripAgent] Error initializing Google:', error.message);
+        }
+    }
+
+    /**
+     * Initialize Sky-Scrapper MCP server (RapidAPI)
+     */
+    async initializeSkyscrapper() {
+        try {
+            const rapidApiKey = process.env.RAPIDAPI_KEY;
+
+            if (!rapidApiKey) {
+                console.log('⚠️ [TripAgent] RAPIDAPI_KEY not set - Sky-Scrapper disabled (falling back to Google Flights links)');
+                return;
+            }
+
+            const result = await this.skyscrapper.initialize(rapidApiKey);
+
+            if (result.success) {
+                console.log('🛩️ [TripAgent] Sky-Scrapper API initialized (RapidAPI - All airlines, price filtering)');
+            } else {
+                console.error('❌ [TripAgent] Failed to initialize Sky-Scrapper:', result.error);
+            }
+        } catch (error) {
+            console.error('❌ [TripAgent] Error initializing Sky-Scrapper:', error.message);
         }
     }
 
@@ -210,6 +237,15 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
             // Use Claude to generate comprehensive trip plan
             const tripPlan = await this.askClaude(prompt);
 
+            // Extract key locations from the trip plan
+            console.log('🗺️ [TripAgent] Extracting locations for Google Maps...');
+            const locations = await this.extractLocationsFromTripPlan(tripPlan, destination);
+            console.log(`📍 [TripAgent] Found ${locations.length} locations:`, locations);
+
+            // Generate Google Maps multi-stop URL
+            const mapsUrl = this.generateGoogleMapsMultiStopURL(locations);
+            console.log('🔗 [TripAgent] Generated maps URL:', mapsUrl);
+
             // Try to save trip plan to memory (optional - continue if Beads not available)
             try {
                 await this.saveToMemory({
@@ -223,7 +259,9 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
                         budget,
                         travelers,
                         preferences,
-                        status: 'planning'
+                        status: 'planning',
+                        locations: locations,
+                        mapsUrl: mapsUrl
                     }
                 });
             } catch (memoryError) {
@@ -232,7 +270,22 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
 
             console.log('✅ [TripAgent] Trip plan created successfully');
 
-            return this.formatResponse(`🌍 **Trip Plan: ${destination}**\n\n${tripPlan}\n\n💡 *I've saved this trip plan to your travel memory. Use "track booking [details]" to save reservations.*`);
+            // Build response with map link
+            let response = `🌍 **Trip Plan: ${destination}**\n\n${tripPlan}`;
+
+            if (mapsUrl) {
+                response += `\n\n🗺️ **View all locations on Google Maps:**\n${mapsUrl}`;
+                if (locations.length > 1) {
+                    response += `\n\n📍 **Route includes:**\n`;
+                    locations.forEach((loc, idx) => {
+                        response += `${idx + 1}. ${loc}\n`;
+                    });
+                }
+            }
+
+            response += `\n\n💡 *I've saved this trip plan to your travel memory. Use "track booking [details]" to save reservations.*`;
+
+            return this.formatResponse(response);
 
         } catch (error) {
             console.error('❌ [TripAgent] Error planning trip:', error);
@@ -1899,6 +1952,79 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
         } catch (error) {
             return `❌ Issue not found: ${issueId}\n\n`;
         }
+    }
+
+    /**
+     * Extract key locations from trip plan text using Claude
+     */
+    async extractLocationsFromTripPlan(tripPlan, destination) {
+        try {
+            const extractPrompt = `From the following trip plan, extract the TOP 5-7 most important locations/attractions mentioned (museums, parks, landmarks, neighborhoods, etc.).
+
+Trip plan:
+${tripPlan}
+
+Return ONLY a JSON array of location names, like:
+["Times Square", "Central Park", "Rockefeller Center", "Brooklyn Bridge", "Statue of Liberty"]
+
+Important:
+- Include the main city/destination first
+- Only include specific places mentioned in the plan
+- Use commonly recognized names
+- Maximum 7 locations total`;
+
+            const response = await this.anthropic.messages.create({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 500,
+                messages: [{
+                    role: 'user',
+                    content: extractPrompt
+                }]
+            });
+
+            const locationsText = response.content[0].text.trim();
+
+            // Parse JSON array from Claude's response
+            const jsonMatch = locationsText.match(/\[.*\]/s);
+            if (jsonMatch) {
+                const locations = JSON.parse(jsonMatch[0]);
+                // Ensure destination is first
+                if (!locations[0].toLowerCase().includes(destination.toLowerCase())) {
+                    locations.unshift(destination);
+                }
+                return locations.slice(0, 7); // Limit to 7 locations
+            }
+
+            // Fallback: just return destination
+            return [destination];
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error extracting locations:', error);
+            // Fallback: just return destination
+            return [destination];
+        }
+    }
+
+    /**
+     * Generate Google Maps URL with multiple waypoints
+     * @param {Array<string>} locations - Array of location names
+     * @returns {string} Google Maps URL
+     */
+    generateGoogleMapsMultiStopURL(locations) {
+        if (!locations || locations.length === 0) {
+            return null;
+        }
+
+        if (locations.length === 1) {
+            // Single location - just search
+            const encoded = encodeURIComponent(locations[0]);
+            return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+        }
+
+        // Multi-stop route
+        // Format: /dir/location1/location2/location3/...
+        const encodedLocations = locations.map(loc => encodeURIComponent(loc));
+        return `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
     }
 
     /**
