@@ -2070,11 +2070,73 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
     }
 
     /**
+     * Validate that extracted locations are relevant to the destination
+     * Filter out locations that clearly belong to other cities/countries
+     */
+    validateLocationsForDestination(locations, destination) {
+        if (!locations || locations.length === 0) {
+            return [];
+        }
+
+        const destLower = destination.toLowerCase().trim();
+
+        // Extract base destination city name (remove country, state, etc.)
+        const destCity = destLower.split(',')[0].trim();
+
+        // Known cities/countries mapping for validation
+        const knownRegions = {
+            // Peru
+            'lima': ['peru', 'miraflores', 'barranco', 'san isidro'],
+            'cusco': ['peru', 'machu picchu'],
+            // USA - NY
+            'new york': ['usa', 'manhattan', 'brooklyn', 'queens', 'bronx', 'nyc'],
+            // USA - Other
+            'los angeles': ['usa', 'california', 'hollywood', 'santa monica'],
+            'san francisco': ['usa', 'california', 'bay area'],
+            // Europe
+            'london': ['uk', 'england', 'britain'],
+            'paris': ['france'],
+            'rome': ['italy'],
+            'barcelona': ['spain', 'catalonia'],
+            // Asia
+            'tokyo': ['japan'],
+            'bangkok': ['thailand'],
+            'singapore': ['singapore'],
+        };
+
+        return locations.filter(location => {
+            const locLower = location.toLowerCase();
+
+            // Always keep if it explicitly mentions the destination
+            if (locLower.includes(destCity)) {
+                return true;
+            }
+
+            // Check if location mentions a different known city
+            for (const [city, regions] of Object.entries(knownRegions)) {
+                // Skip if this is our destination city
+                if (destCity.includes(city) || city.includes(destCity)) {
+                    continue;
+                }
+
+                // Check if location mentions this other city or its regions
+                if (locLower.includes(city) || regions.some(region => locLower.includes(region))) {
+                    console.log(`⚠️ [TripAgent] Filtering out location "${location}" - belongs to ${city}, not ${destination}`);
+                    return false;
+                }
+            }
+
+            // If no clear mismatch found, keep it
+            return true;
+        });
+    }
+
+    /**
      * Extract key locations from trip plan text using Claude
      */
     async extractLocationsFromTripPlan(tripPlan, destination) {
         try {
-            const extractPrompt = `From the following trip plan, extract the TOP 5-7 most important locations/attractions mentioned (museums, parks, landmarks, neighborhoods, etc.).
+            const extractPrompt = `From the following trip plan for **${destination}**, extract the TOP 5-7 most important locations/attractions mentioned (museums, parks, landmarks, neighborhoods, etc.).
 
 Trip plan:
 ${tripPlan}
@@ -2082,11 +2144,14 @@ ${tripPlan}
 Return ONLY a JSON array of location names, like:
 ["Times Square", "Central Park", "Rockefeller Center", "Brooklyn Bridge", "Statue of Liberty"]
 
-Important:
+CRITICAL REQUIREMENTS:
+- ONLY extract locations that are actually in/near ${destination}
+- Ignore any locations from other cities or countries
 - Include the main city/destination first
 - Only include specific places mentioned in the plan
 - Use commonly recognized names
-- Maximum 7 locations total`;
+- Maximum 7 locations total
+- If a location name doesn't clearly indicate it's in ${destination}, add the city name (e.g., "Times Square, New York")`;
 
             const response = await this.anthropic.messages.create({
                 model: 'claude-sonnet-4-20250514',
@@ -2102,11 +2167,16 @@ Important:
             // Parse JSON array from Claude's response
             const jsonMatch = locationsText.match(/\[.*\]/s);
             if (jsonMatch) {
-                const locations = JSON.parse(jsonMatch[0]);
+                let locations = JSON.parse(jsonMatch[0]);
+
+                // Validate locations - filter out any that seem unrelated to destination
+                locations = this.validateLocationsForDestination(locations, destination);
+
                 // Ensure destination is first
-                if (!locations[0].toLowerCase().includes(destination.toLowerCase())) {
+                if (locations.length === 0 || !locations[0].toLowerCase().includes(destination.toLowerCase())) {
                     locations.unshift(destination);
                 }
+
                 return locations.slice(0, 7); // Limit to 7 locations
             }
 
