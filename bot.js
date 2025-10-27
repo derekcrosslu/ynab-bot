@@ -193,6 +193,10 @@ const whatsappClient = new Client({
     }
 });
 
+// ===== USER LOCATION STORAGE =====
+// Store user locations from WhatsApp location sharing
+const userLocations = new Map(); // userId -> { lat, lng, address, timestamp }
+
 // ===== DEFINICIÓN DE HERRAMIENTAS PARA CLAUDE =====
 
 const tools = [
@@ -1594,6 +1598,37 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
             return;
         }
 
+        // ===== LOCATION DETECTION =====
+        // Detect if user shared their location
+        if (msg.location) {
+            console.log('📍 User shared location:', msg.location);
+
+            const locationData = {
+                lat: msg.location.latitude,
+                lng: msg.location.longitude,
+                description: msg.location.description || 'Current location',
+                timestamp: Date.now()
+            };
+
+            // Store user location
+            userLocations.set(msg.from, locationData);
+            console.log(`✅ Location saved for ${msg.from}: ${locationData.lat}, ${locationData.lng}`);
+
+            // Confirm to user
+            const locationMsg = `📍 **Location Received!**\n\n` +
+                `✅ I've saved your location: ${locationData.description}\n` +
+                `📌 Coordinates: ${locationData.lat.toFixed(6)}, ${locationData.lng.toFixed(6)}\n\n` +
+                `💡 **What you can do now:**\n` +
+                `• "directions to JFK Airport" - I'll use your location as starting point\n` +
+                `• "walking directions to Central Park"\n` +
+                `• "public transport to downtown"\n` +
+                `• "search hotels near me"\n\n` +
+                `🔄 Share your location again anytime to update it.`;
+
+            await msg.reply(stateManager.addStatusFooter(locationMsg, msg.from));
+            return;
+        }
+
         // Detectar si el mensaje tiene imagen o PDF
         let imageData = null;
         let pdfText = null;
@@ -1655,6 +1690,10 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
 
         // ===== DUAL-MODE ROUTING (PRIMARY) =====
         // Mode router decides: legacy flows OR multi-agent system
+
+        // Get user's stored location if available
+        const userLocation = userLocations.get(msg.from);
+
         const modeResult = await modeRouter.handleMessage(
             msg.from,
             msg.body,
@@ -1663,7 +1702,8 @@ El bot combina menús estructurados con conversación inteligente de Claude AI.`
                 isPDF: pdfText !== null,
                 isImage: imageData !== null,
                 pdfText: pdfText,
-                imageData: imageData
+                imageData: imageData,
+                userLocation: userLocation // Pass stored location to mode router
             }
         );
 

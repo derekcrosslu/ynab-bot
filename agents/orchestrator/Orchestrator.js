@@ -353,12 +353,18 @@ Examples:
 - "book option 1" → {"agent": "trip", "action": "book_flight", "confidence": 0.95, "params": {"option": "1"}}
 - "book hotel option 2" → {"agent": "trip", "action": "book_hotel", "confidence": 0.95, "params": {"option": "2"}}
 
-**Directions:**
+**Directions (with both locations):**
 - "directions from Times Square to JFK Airport" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"from": "Times Square", "to": "JFK Airport", "mode": "driving"}}
 - "walking directions from Central Park to MoMA" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"from": "Central Park", "to": "MoMA", "mode": "walking"}}
 - "public transport from LAX to downtown LA" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"from": "LAX", "to": "downtown LA", "mode": "transit"}}
 - "how do I get from Brooklyn to Manhattan" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"from": "Brooklyn", "to": "Manhattan", "mode": "driving"}}
-- "bike route from Golden Gate Park to Fisherman's Wharf" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"from": "Golden Gate Park", "to": "Fisherman's Wharf", "mode": "bicycling"}}
+
+**Directions (using user's shared location - NO "from" parameter):**
+- "directions to JFK Airport" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"to": "JFK Airport", "mode": "driving"}}
+- "walking directions to Central Park" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"to": "Central Park", "mode": "walking"}}
+- "public transport to downtown" → {"agent": "trip", "action": "get_directions", "confidence": 0.95, "params": {"to": "downtown", "mode": "transit"}}
+- "how do I get to Times Square" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"to": "Times Square", "mode": "driving"}}
+- "bike route to Fisherman's Wharf" → {"agent": "trip", "action": "get_directions", "confidence": 0.90, "params": {"to": "Fisherman's Wharf", "mode": "bicycling"}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 

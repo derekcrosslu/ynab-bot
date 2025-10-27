@@ -951,20 +951,50 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
         const { from, to, origin, destination, mode, travelMode } = params;
 
         // Support both 'from/to' and 'origin/destination' parameter names
-        const startLocation = from || origin;
+        let startLocation = from || origin;
         const endLocation = to || destination;
 
         // Support both 'mode' and 'travelMode' parameter names
         const transportMode = (mode || travelMode || 'driving').toLowerCase();
 
+        // Check if user has shared their location and no "from" was specified
+        const userLocation = context?.userLocation;
+        let usingSharedLocation = false;
+
+        if (!startLocation && userLocation) {
+            // Use stored location coordinates
+            startLocation = `${userLocation.lat},${userLocation.lng}`;
+            usingSharedLocation = true;
+            console.log(`📍 [TripAgent] Using user's shared location as starting point: ${startLocation}`);
+        }
+
         // Validate required parameters
-        if (!startLocation || !endLocation) {
+        if (!startLocation && !endLocation) {
             return this.formatResponse(
-                `❌ I need both a starting point and destination to get directions.\n\n` +
+                `❌ I need a destination to get directions.\n\n` +
+                `**Options:**\n` +
+                `1. Share your location first, then ask: "directions to JFK Airport"\n` +
+                `2. Or specify both locations: "directions from Times Square to JFK Airport"\n\n` +
+                `💡 To share location: Tap 📎 → Location in WhatsApp`
+            );
+        }
+
+        if (!endLocation) {
+            return this.formatResponse(
+                `❌ I need a destination.\n\n` +
                 `**Example:**\n` +
-                `• "directions from Times Square to JFK Airport"\n` +
-                `• "walking directions from Central Park to MoMA"\n` +
-                `• "public transport from LAX to downtown LA"`
+                `• "directions to JFK Airport" ${userLocation ? '(I\'ll use your shared location)' : ''}\n` +
+                `• "walking directions to Central Park"\n` +
+                `• "public transport to downtown"`
+            );
+        }
+
+        if (!startLocation) {
+            return this.formatResponse(
+                `❌ I need a starting point.\n\n` +
+                `**Options:**\n` +
+                `1. Share your location first (Tap 📎 → Location)\n` +
+                `2. Or specify: "directions from Times Square to ${endLocation}"`
             );
         }
 
@@ -1002,7 +1032,14 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
 
             // Format directions for WhatsApp
             let directionsMessage = `${modeEmoji[selectedMode]} **${selectedMode.toUpperCase()} DIRECTIONS**\n\n`;
-            directionsMessage += `📍 **From:** ${route.origin}\n`;
+
+            // Show if using shared location
+            if (usingSharedLocation) {
+                directionsMessage += `📍 **From:** ${route.origin} *(your location)*\n`;
+            } else {
+                directionsMessage += `📍 **From:** ${route.origin}\n`;
+            }
+
             directionsMessage += `📍 **To:** ${route.destination}\n\n`;
             directionsMessage += `📏 **Distance:** ${route.distance}\n`;
             directionsMessage += `⏱️ **Duration:** ${route.duration}\n`;
