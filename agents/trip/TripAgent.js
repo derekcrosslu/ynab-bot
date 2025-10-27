@@ -299,7 +299,7 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
     async searchFlights(params, context) {
         console.log('✈️ [TripAgent] Searching flights with params:', params);
 
-        const { from, to, dates, passengers, class: flightClass, exclude, prefer, only } = params;
+        const { from, to, dates, passengers, class: flightClass, exclude, prefer, only, price, maxPrice } = params;
 
         // Validate required params
         if (!from || !to) {
@@ -332,6 +332,29 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
         } catch (parseError) {
             return this.formatResponse(`❌ I couldn't understand the dates "${dates}". Please use format like:\n- "Dec 11"\n- "2025-12-11"\n- "Dec 11 to Dec 21" (round-trip)`);
         }
+
+        // Parse price constraint (if provided)
+        let priceConstraint = null;
+        if (price) {
+            // Try to parse from price parameter
+            priceConstraint = this.parsePriceConstraint(price);
+        } else if (maxPrice) {
+            // Direct maxPrice provided (numeric)
+            priceConstraint = {
+                maxPrice: parseFloat(maxPrice),
+                currency: 'USD'
+            };
+        } else if (context && context.query) {
+            // Try to parse from full query text
+            priceConstraint = this.parsePriceConstraint(context.query);
+        }
+
+        if (priceConstraint) {
+            console.log(`💰 [TripAgent] Price constraint applied: max ${priceConstraint.maxPrice} ${priceConstraint.currency}`);
+        }
+
+        // TODO: Use priceConstraint with Sky-Scrapper API when calling this.skyscrapper.searchFlights()
+        // For now, it's displayed in the response and logged for debugging
 
         // Generate Google Flights link (always works, all airlines)
         const googleFlightsUrl = this.generateGoogleFlightsLink({
@@ -419,8 +442,14 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
         let response = `✈️ **Flights: ${originCode} → ${destinationCode}**\n\n`;
         response += `📅 ${tripType}\n`;
         response += `📆 Depart: ${departureDate}${returnDate ? `\n🔄 Return: ${returnDate}` : ''}\n`;
-        response += `👥 ${passengerText}${classText}\n\n`;
-        response += `🔍 **Search on Google Flights** (All airlines, best prices):\n`;
+        response += `👥 ${passengerText}${classText}\n`;
+
+        // Add price constraint if specified
+        if (priceConstraint) {
+            response += `💰 Max price: ${priceConstraint.currency} ${priceConstraint.maxPrice.toLocaleString()}\n`;
+        }
+
+        response += `\n🔍 **Search on Google Flights** (All airlines, best prices):\n`;
         response += `${googleFlightsUrl}\n`;
 
         if (amadeusSampleResults) {
@@ -861,6 +890,92 @@ Format the response in a clear, organized way with emojis for visual appeal.`;
         }
 
         return cityMap[normalizedDest] || null;
+    }
+
+    /**
+     * Parse price constraint from text input
+     * Supports formats like:
+     * - "under $1000" or "under 1000"
+     * - "less than 800"
+     * - "max 500 dollars" or "maximum 500"
+     * - "below €500"
+     * - "up to 1000 USD"
+     *
+     * @param {string} text - Text to parse (from params.price or query)
+     * @returns {Object|null} - { maxPrice: number, currency: string } or null if no price found
+     */
+    parsePriceConstraint(text) {
+        if (!text || typeof text !== 'string') {
+            return null;
+        }
+
+        const normalizedText = text.toLowerCase().trim();
+
+        // Currency symbol mappings
+        const currencySymbols = {
+            '$': 'USD',
+            '€': 'EUR',
+            '£': 'GBP',
+            '¥': 'JPY',
+            '₹': 'INR'
+        };
+
+        // Currency word mappings
+        const currencyWords = {
+            'dollars?': 'USD',
+            'usd': 'USD',
+            'euros?': 'EUR',
+            'eur': 'EUR',
+            'pounds?': 'GBP',
+            'gbp': 'GBP',
+            'yen': 'JPY',
+            'jpy': 'JPY',
+            'rupees?': 'INR',
+            'inr': 'INR'
+        };
+
+        // Patterns to match price constraints
+        const patterns = [
+            /(?:under|below|up\s+to)\s+([€£$¥₹])?\s*(\d+(?:,\d{3})*(?:\.\d{2})?)\s*([a-z]{3}|dollars?|euros?|pounds?|yen|rupees?)?/i,
+            /(?:less|max(?:imum)?)\s+(?:than\s+)?([€£$¥₹])?\s*(\d+(?:,\d{3})*(?:\.\d{2})?)\s*([a-z]{3}|dollars?|euros?|pounds?|yen|rupees?)?/i,
+            /([€£$¥₹])\s*(\d+(?:,\d{3})*(?:\.\d{2})?)\s+(?:or\s+)?(?:less|max|maximum)/i
+        ];
+
+        for (const pattern of patterns) {
+            const match = normalizedText.match(pattern);
+            if (match) {
+                const symbol = match[1];
+                const priceStr = match[2];
+                const currencyText = match[3];
+
+                // Parse price (remove commas)
+                const maxPrice = parseFloat(priceStr.replace(/,/g, ''));
+
+                if (isNaN(maxPrice) || maxPrice <= 0) {
+                    continue;
+                }
+
+                // Determine currency
+                let currency = 'USD'; // Default
+
+                if (symbol && currencySymbols[symbol]) {
+                    currency = currencySymbols[symbol];
+                } else if (currencyText) {
+                    // Check currency words
+                    for (const [word, curr] of Object.entries(currencyWords)) {
+                        if (new RegExp(word, 'i').test(currencyText)) {
+                            currency = curr;
+                            break;
+                        }
+                    }
+                }
+
+                console.log(`💰 [TripAgent] Parsed price constraint: max ${maxPrice} ${currency}`);
+                return { maxPrice, currency };
+            }
+        }
+
+        return null;
     }
 
     /**
