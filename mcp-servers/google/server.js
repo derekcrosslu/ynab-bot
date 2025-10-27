@@ -1,15 +1,21 @@
 /**
- * Google MCP Server - Gmail, Calendar, and Maps Integration
+ * Google MCP Server - Gmail, Calendar, Maps, Contacts, and Tasks Integration
  *
  * Provides MCP tools for:
  * - Gmail: Read emails, search for booking confirmations
  * - Calendar: Create events, list events
  * - Maps: Geocode addresses, get place details, calculate distances
+ * - Contacts: Search and manage contacts
+ * - Tasks: View and manage tasks/to-do lists
  *
  * Google APIs Docs:
  * - Gmail: https://developers.google.com/gmail/api
  * - Calendar: https://developers.google.com/calendar/api
  * - Maps: https://developers.google.com/maps/documentation
+ * - People (Contacts): https://developers.google.com/people/api
+ * - Tasks: https://developers.google.com/tasks/reference/rest
+ *
+ * Note: Google Keep does not have a public API available for third-party apps
  */
 
 const { google } = require('googleapis');
@@ -21,6 +27,8 @@ class GoogleMCPServer {
         this.gmail = null;
         this.calendar = null;
         this.maps = null;
+        this.people = null;  // Google People API (Contacts)
+        this.tasks = null;   // Google Tasks API
         this.auth = null;
         this.initialized = false;
     }
@@ -82,13 +90,19 @@ class GoogleMCPServer {
             // Initialize Calendar API
             this.calendar = google.calendar({ version: 'v3', auth: this.auth });
 
+            // Initialize People API (Contacts)
+            this.people = google.people({ version: 'v1', auth: this.auth });
+
+            // Initialize Tasks API
+            this.tasks = google.tasks({ version: 'v1', auth: this.auth });
+
             // Initialize Maps (uses API key, not OAuth)
             if (mapsApiKey) {
                 this.mapsApiKey = mapsApiKey;
             }
 
             this.initialized = true;
-            console.log('✅ Google MCP Server initialized (Gmail + Calendar + Maps)');
+            console.log('✅ Google MCP Server initialized (Gmail + Calendar + Maps + Contacts + Tasks)');
 
             return { success: true };
 
@@ -442,6 +456,197 @@ class GoogleMCPServer {
 
         } catch (error) {
             console.error('❌ Directions request failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ==================== CONTACTS METHODS ====================
+
+    /**
+     * Search contacts
+     * @param {string} query - Search query (name, email, phone)
+     * @param {number} pageSize - Number of results (default 10)
+     */
+    async searchContacts(query, pageSize = 10) {
+        if (!this.people) {
+            return { error: 'People API not initialized' };
+        }
+
+        try {
+            const response = await this.people.people.searchContacts({
+                query: query,
+                pageSize: pageSize,
+                readMask: 'names,emailAddresses,phoneNumbers,organizations'
+            });
+
+            const contacts = (response.data.results || []).map(result => {
+                const person = result.person;
+                return {
+                    resourceName: person.resourceName,
+                    name: person.names?.[0]?.displayName || 'Unknown',
+                    email: person.emailAddresses?.[0]?.value || null,
+                    phone: person.phoneNumbers?.[0]?.value || null,
+                    company: person.organizations?.[0]?.name || null
+                };
+            });
+
+            return {
+                success: true,
+                contacts: contacts,
+                count: contacts.length
+            };
+
+        } catch (error) {
+            console.error('❌ Contact search failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * List contacts (all or recent)
+     * @param {number} pageSize - Number of results (default 10)
+     */
+    async listContacts(pageSize = 10) {
+        if (!this.people) {
+            return { error: 'People API not initialized' };
+        }
+
+        try {
+            const response = await this.people.people.connections.list({
+                resourceName: 'people/me',
+                pageSize: pageSize,
+                personFields: 'names,emailAddresses,phoneNumbers,organizations,photos'
+            });
+
+            const contacts = (response.data.connections || []).map(person => ({
+                resourceName: person.resourceName,
+                name: person.names?.[0]?.displayName || 'Unknown',
+                email: person.emailAddresses?.[0]?.value || null,
+                phone: person.phoneNumbers?.[0]?.value || null,
+                company: person.organizations?.[0]?.name || null,
+                photo: person.photos?.[0]?.url || null
+            }));
+
+            return {
+                success: true,
+                contacts: contacts,
+                count: contacts.length
+            };
+
+        } catch (error) {
+            console.error('❌ Contact list failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ==================== TASKS METHODS ====================
+
+    /**
+     * List task lists
+     */
+    async listTaskLists() {
+        if (!this.tasks) {
+            return { error: 'Tasks API not initialized' };
+        }
+
+        try {
+            const response = await this.tasks.tasklists.list({
+                maxResults: 10
+            });
+
+            const taskLists = (response.data.items || []).map(list => ({
+                id: list.id,
+                title: list.title,
+                updated: list.updated
+            }));
+
+            return {
+                success: true,
+                taskLists: taskLists,
+                count: taskLists.length
+            };
+
+        } catch (error) {
+            console.error('❌ Task lists fetch failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * List tasks from a specific task list
+     * @param {string} taskListId - Task list ID (optional, uses default if not provided)
+     * @param {boolean} showCompleted - Include completed tasks (default false)
+     */
+    async listTasks(taskListId = '@default', showCompleted = false) {
+        if (!this.tasks) {
+            return { error: 'Tasks API not initialized' };
+        }
+
+        try {
+            const response = await this.tasks.tasks.list({
+                tasklist: taskListId,
+                maxResults: 20,
+                showCompleted: showCompleted,
+                showHidden: false
+            });
+
+            const tasks = (response.data.items || []).map(task => ({
+                id: task.id,
+                title: task.title,
+                notes: task.notes || null,
+                status: task.status, // 'needsAction' or 'completed'
+                due: task.due || null,
+                completed: task.completed || null,
+                updated: task.updated
+            }));
+
+            return {
+                success: true,
+                tasks: tasks,
+                count: tasks.length,
+                taskListId: taskListId
+            };
+
+        } catch (error) {
+            console.error('❌ Tasks fetch failed:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Create a new task
+     * @param {string} title - Task title
+     * @param {string} notes - Task notes/description (optional)
+     * @param {string} due - Due date in ISO format (optional)
+     * @param {string} taskListId - Task list ID (optional, uses default)
+     */
+    async createTask(title, notes = null, due = null, taskListId = '@default') {
+        if (!this.tasks) {
+            return { error: 'Tasks API not initialized' };
+        }
+
+        try {
+            const task = {
+                title: title
+            };
+
+            if (notes) task.notes = notes;
+            if (due) task.due = due;
+
+            const response = await this.tasks.tasks.insert({
+                tasklist: taskListId,
+                requestBody: task
+            });
+
+            return {
+                success: true,
+                taskId: response.data.id,
+                title: response.data.title,
+                status: response.data.status
+            };
+
+        } catch (error) {
+            console.error('❌ Task creation failed:', error.message);
             return { success: false, error: error.message };
         }
     }

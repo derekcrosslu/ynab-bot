@@ -372,7 +372,7 @@ User message: "${message}"
 
 Available agents and their capabilities:
 - BudgetAgent: view_balance, create_transaction, categorize_transactions, view_transactions, analyze_spending
-- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar
+- TripAgent: plan_trip, search_flights, book_flight, search_hotels, book_hotel, create_itinerary, track_booking, get_trip_suggestions, get_directions, check_emails, check_calendar, check_contacts, check_tasks
 
 Context: ${context.hasDocument ? 'User sent a document (PDF/Image)' : 'No document attached'}
 User location: ${context.userLocation ? 'User has shared their location (use for directions)' : 'No location shared'}
@@ -459,6 +459,18 @@ Examples:
 - "check my calendar for next 7 days" → {"agent": "trip", "action": "check_calendar", "confidence": 0.95, "params": {"days": "7"}}
 - "upcoming events" → {"agent": "trip", "action": "check_calendar", "confidence": 0.85, "params": {}}
 - "my schedule" → {"agent": "trip", "action": "check_calendar", "confidence": 0.80, "params": {}}
+
+**Contacts:**
+- "find contact John Smith" → {"agent": "trip", "action": "check_contacts", "confidence": 0.95, "params": {"query": "John Smith"}}
+- "search contacts for jane" → {"agent": "trip", "action": "check_contacts", "confidence": 0.90, "params": {"query": "jane"}}
+- "show my contacts" → {"agent": "trip", "action": "check_contacts", "confidence": 0.85, "params": {}}
+- "find someone in my contacts" → {"agent": "trip", "action": "check_contacts", "confidence": 0.80, "params": {}}
+
+**Tasks:**
+- "show my tasks" → {"agent": "trip", "action": "check_tasks", "confidence": 0.95, "params": {}}
+- "check my to-do list" → {"agent": "trip", "action": "check_tasks", "confidence": 0.90, "params": {}}
+- "what tasks do I have" → {"agent": "trip", "action": "check_tasks", "confidence": 0.85, "params": {}}
+- "show tasks with completed" → {"agent": "trip", "action": "check_tasks", "confidence": 0.90, "params": {"showCompleted": true}}
 
 Respond ONLY with the JSON object, no markdown, no explanations.`;
 

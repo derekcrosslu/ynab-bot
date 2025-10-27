@@ -37,7 +37,9 @@ class TripAgent extends BaseAgent {
             'get_trip_suggestions',
             'get_directions',
             'check_emails',
-            'check_calendar'
+            'check_calendar',
+            'check_contacts',
+            'check_tasks'
         ]);
 
         this.anthropic = anthropic;
@@ -85,9 +87,9 @@ class TripAgent extends BaseAgent {
 
             if (result.success) {
                 if (result.mapsOnly) {
-                    console.log('📍 [TripAgent] Google Maps initialized (Calendar/Gmail disabled)');
+                    console.log('📍 [TripAgent] Google Maps initialized (Other services disabled)');
                 } else {
-                    console.log('📅 [TripAgent] Google services initialized (Calendar + Maps + Gmail)');
+                    console.log('📅 [TripAgent] Google services initialized (Gmail + Calendar + Maps + Contacts + Tasks)');
                 }
             } else if (result.warning) {
                 console.log('⚠️ [TripAgent]', result.warning);
@@ -142,6 +144,12 @@ class TripAgent extends BaseAgent {
 
                 case 'check_calendar':
                     return await this.checkCalendar(params, context);
+
+                case 'check_contacts':
+                    return await this.checkContacts(params, context);
+
+                case 'check_tasks':
+                    return await this.checkTasks(params, context);
 
                 default:
                     return this.formatResponse(
@@ -1305,6 +1313,201 @@ Make it inspiring but practical. Use emojis for visual appeal.`;
     formatTime(date) {
         const options = { hour: 'numeric', minute: '2-digit', hour12: true };
         return date.toLocaleTimeString('en-US', options);
+    }
+
+    /**
+     * 12. CHECK CONTACTS - Search Google Contacts
+     */
+    async checkContacts(params, context) {
+        console.log('👥 [TripAgent] Checking contacts with params:', params);
+
+        // Check if Google People API is initialized
+        if (!this.google || !this.google.people) {
+            return this.formatResponse(
+                `❌ **Google Contacts Not Available**\n\n` +
+                `Contacts integration is not set up. This requires Google OAuth authentication.\n\n` +
+                `If you're the admin, please set up OAuth credentials following the SETUP.md guide.`
+            );
+        }
+
+        try {
+            // Parse parameters
+            const { query, search, name, limit } = params;
+            const searchQuery = query || search || name;
+
+            let result;
+            let contactsMessage = `👥 **Your Contacts**\n\n`;
+
+            if (searchQuery) {
+                // Search contacts
+                console.log(`👥 [TripAgent] Searching contacts for: "${searchQuery}"`);
+                result = await this.google.searchContacts(searchQuery, limit || 10);
+
+                if (result.error) {
+                    return this.formatResponse(`❌ Error searching contacts: ${result.error}`);
+                }
+
+                if (!result.contacts || result.contacts.length === 0) {
+                    return this.formatResponse(
+                        `👥 **No Contacts Found**\n\n` +
+                        `No contacts matching: "${searchQuery}"\n\n` +
+                        `**Try:**\n` +
+                        `• "find contact John Smith"\n` +
+                        `• "search contacts for jane@email.com"\n` +
+                        `• "show my contacts"`
+                    );
+                }
+
+                contactsMessage += `Found ${result.contacts.length} contact${result.contacts.length > 1 ? 's' : ''} matching: "${searchQuery}"\n\n`;
+            } else {
+                // List all contacts
+                console.log(`👥 [TripAgent] Listing contacts (limit: ${limit || 10})`);
+                result = await this.google.listContacts(limit || 10);
+
+                if (result.error) {
+                    return this.formatResponse(`❌ Error fetching contacts: ${result.error}`);
+                }
+
+                if (!result.contacts || result.contacts.length === 0) {
+                    return this.formatResponse(
+                        `👥 **No Contacts Found**\n\n` +
+                        `You have no contacts in your Google Contacts.`
+                    );
+                }
+
+                contactsMessage += `Your ${result.contacts.length} most recent contact${result.contacts.length > 1 ? 's' : ''}:\n\n`;
+            }
+
+            // Format contacts
+            result.contacts.forEach((contact, index) => {
+                contactsMessage += `**${index + 1}. ${contact.name}**\n`;
+
+                if (contact.email) {
+                    contactsMessage += `📧 ${contact.email}\n`;
+                }
+
+                if (contact.phone) {
+                    contactsMessage += `📱 ${contact.phone}\n`;
+                }
+
+                if (contact.company) {
+                    contactsMessage += `🏢 ${contact.company}\n`;
+                }
+
+                contactsMessage += `\n`;
+            });
+
+            // Add tips
+            contactsMessage += `💡 **Tips:**\n`;
+            contactsMessage += `• "find contact John"\n`;
+            contactsMessage += `• "search contacts for @company.com"`;
+
+            return this.formatResponse(contactsMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error checking contacts:', error);
+            return this.formatResponse(`❌ Sorry, I couldn't check your contacts: ${error.message}`);
+        }
+    }
+
+    /**
+     * 13. CHECK TASKS - View Google Tasks to-do lists
+     */
+    async checkTasks(params, context) {
+        console.log('✅ [TripAgent] Checking tasks with params:', params);
+
+        // Check if Google Tasks API is initialized
+        if (!this.google || !this.google.tasks) {
+            return this.formatResponse(
+                `❌ **Google Tasks Not Available**\n\n` +
+                `Tasks integration is not set up. This requires Google OAuth authentication.\n\n` +
+                `If you're the admin, please set up OAuth credentials following the SETUP.md guide.`
+            );
+        }
+
+        try {
+            // Parse parameters
+            const { showCompleted, completed, all } = params;
+            const includeCompleted = showCompleted || completed || all || false;
+
+            console.log(`✅ [TripAgent] Fetching tasks (includeCompleted: ${includeCompleted})`);
+
+            // Fetch tasks from default task list
+            const result = await this.google.listTasks('@default', includeCompleted);
+
+            if (result.error) {
+                return this.formatResponse(`❌ Error fetching tasks: ${result.error}`);
+            }
+
+            if (!result.tasks || result.tasks.length === 0) {
+                return this.formatResponse(
+                    `✅ **No Tasks Found**\n\n` +
+                    `You have no tasks in your Google Tasks list.\n\n` +
+                    `💡 **Tip:** You can create tasks in the Google Tasks app or Gmail.`
+                );
+            }
+
+            // Separate pending and completed tasks
+            const pendingTasks = result.tasks.filter(t => t.status === 'needsAction');
+            const completedTasks = result.tasks.filter(t => t.status === 'completed');
+
+            // Format tasks message
+            let tasksMessage = `✅ **Your Tasks**\n\n`;
+
+            if (pendingTasks.length > 0) {
+                tasksMessage += `**📝 To Do (${pendingTasks.length}):**\n\n`;
+
+                pendingTasks.forEach((task, index) => {
+                    tasksMessage += `${index + 1}. ☐ **${task.title}**\n`;
+
+                    if (task.notes) {
+                        const notes = task.notes.length > 80
+                            ? task.notes.substring(0, 80) + '...'
+                            : task.notes;
+                        tasksMessage += `   📝 ${notes}\n`;
+                    }
+
+                    if (task.due) {
+                        const dueDate = new Date(task.due);
+                        tasksMessage += `   📅 Due: ${this.formatDate(dueDate)}\n`;
+                    }
+
+                    tasksMessage += `\n`;
+                });
+            }
+
+            if (includeCompleted && completedTasks.length > 0) {
+                tasksMessage += `\n**✅ Completed (${completedTasks.length}):**\n\n`;
+
+                completedTasks.forEach((task, index) => {
+                    if (index < 5) {  // Show max 5 completed tasks
+                        tasksMessage += `${index + 1}. ☑ ${task.title}\n`;
+                    }
+                });
+
+                if (completedTasks.length > 5) {
+                    tasksMessage += `   ...and ${completedTasks.length - 5} more\n`;
+                }
+            }
+
+            // Add summary
+            tasksMessage += `\n📊 **Summary:**\n`;
+            tasksMessage += `• ${pendingTasks.length} task${pendingTasks.length !== 1 ? 's' : ''} to do\n`;
+            if (includeCompleted) {
+                tasksMessage += `• ${completedTasks.length} completed\n`;
+            }
+
+            // Add tips
+            tasksMessage += `\n💡 **Tips:**\n`;
+            tasksMessage += `• "show my tasks" - View pending tasks\n`;
+            tasksMessage += `• "check tasks with completed" - Include completed tasks`;
+
+            return this.formatResponse(tasksMessage);
+
+        } catch (error) {
+            console.error('❌ [TripAgent] Error checking tasks:', error);
+            return this.formatResponse(`❌ Sorry, I couldn't check your tasks: ${error.message}`);
+        }
     }
 
     /**
