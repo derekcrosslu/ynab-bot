@@ -2359,8 +2359,12 @@ EXAMPLES OF WHAT TO EXCLUDE:
         });
 
         // For multi-stop: first location is origin, last is destination, middle are waypoints
-        // Use custom encoding: + for spaces (displays better than %20 in Google Maps UI)
-        const encodeForMaps = (str) => encodeURIComponent(str).replace(/%20/g, '+');
+        // Use custom encoding: + for spaces, keep commas unencoded (Google Maps needs them)
+        const encodeForMaps = (str) => {
+            return encodeURIComponent(str)
+                .replace(/%20/g, '+')    // Use + for spaces (cleaner display)
+                .replace(/%2C/g, ',');   // Keep commas unencoded (required by Google Maps)
+        };
 
         const origin = encodeForMaps(disambiguatedLocations[0]);
         const dest = encodeForMaps(disambiguatedLocations[disambiguatedLocations.length - 1]);
