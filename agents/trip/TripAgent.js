@@ -2262,15 +2262,24 @@ CRITICAL REQUIREMENTS - READ CAREFULLY:
 - DO NOT include locations from other cities or countries under ANY circumstances
 - DO NOT include street addresses or avenue names (like "Av. Something", "123 Main St", etc.)
 - ONLY include well-known landmarks, museums, parks, neighborhoods, monuments
-- Use simple landmark names without full addresses
+- Use SPECIFIC, UNAMBIGUOUS names that Google Maps will recognize correctly
+- Add neighborhood/area context when it helps disambiguation (e.g., "Met Museum Manhattan" not just "Metropolitan Museum")
+- Use popular short names when they're more specific (e.g., "The Met NYC" instead of "Metropolitan Museum of Art")
 - If you're unsure whether a location is in ${destination}, DO NOT include it
 - Include the main city/destination first
 - Maximum 7 locations total
 
+EXAMPLES OF GOOD VS BAD NAMES:
+✅ GOOD: "The Met NYC", "Empire State Building Manhattan", "Central Park NYC"
+❌ BAD: "Metropolitan Museum of Art" (could match museums in other cities)
+✅ GOOD: "Statue of Liberty New York Harbor"
+❌ BAD: "Statue of Liberty" (could be replicas elsewhere)
+
 EXAMPLES OF WHAT TO EXCLUDE:
 - Street addresses: "Av. Oscar R. Benavides", "123 Main Street"
 - Locations from other cities: If planning NYC, exclude anything from Lima, London, etc.
-- Ambiguous locations: If unsure, leave it out`;
+- Ambiguous location names that exist in multiple cities
+- Generic names without disambiguation`;
 
             const response = await this.anthropic.messages.create({
                 model: 'claude-sonnet-4-20250514',
