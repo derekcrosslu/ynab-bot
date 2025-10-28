@@ -2350,14 +2350,17 @@ EXAMPLES OF WHAT TO EXCLUDE:
         });
 
         // For multi-stop: first location is origin, last is destination, middle are waypoints
-        const origin = encodeURIComponent(disambiguatedLocations[0]);
-        const dest = encodeURIComponent(disambiguatedLocations[disambiguatedLocations.length - 1]);
+        // Use custom encoding: + for spaces (displays better than %20 in Google Maps UI)
+        const encodeForMaps = (str) => encodeURIComponent(str).replace(/%20/g, '+');
+
+        const origin = encodeForMaps(disambiguatedLocations[0]);
+        const dest = encodeForMaps(disambiguatedLocations[disambiguatedLocations.length - 1]);
 
         // Build waypoints if there are middle stops
         let waypointsParam = '';
         if (disambiguatedLocations.length > 2) {
             const waypoints = disambiguatedLocations.slice(1, -1)
-                .map(loc => encodeURIComponent(loc))
+                .map(loc => encodeForMaps(loc))
                 .join('|');
             waypointsParam = `&waypoints=${waypoints}`;
         }
