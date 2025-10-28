@@ -2341,9 +2341,10 @@ EXAMPLES OF WHAT TO EXCLUDE:
             return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
         }
 
-        // Multi-stop route with travel mode
-        // Use Directions API format which properly supports travelmode for multi-stop routes
-        // Format: ?api=1&origin=...&destination=...&waypoints=...&travelmode=transit
+        // Multi-stop route
+        // IMPORTANT: Google Maps Directions API does NOT support transit mode with multiple waypoints
+        // For multi-stop routes, use /dir/ format which shows all locations and lets Google Maps
+        // offer all available travel modes (transit, walking, driving, etc.)
 
         // Add destination city to each location to prevent Google Maps from finding wrong locations
         const disambiguatedLocations = locations.map((loc, index) => {
@@ -2358,28 +2359,23 @@ EXAMPLES OF WHAT TO EXCLUDE:
             return loc;
         });
 
-        // For multi-stop: first location is origin, last is destination, middle are waypoints
-        // Use custom encoding: + for spaces, keep commas unencoded (Google Maps needs them)
+        // Use /dir/ URL format for multi-stop routes
+        // This format shows all locations and lets user choose travel mode
+        // Format: /dir/location1/location2/location3/
         const encodeForMaps = (str) => {
             return encodeURIComponent(str)
                 .replace(/%20/g, '+')    // Use + for spaces (cleaner display)
                 .replace(/%2C/g, ',');   // Keep commas unencoded (required by Google Maps)
         };
 
-        const origin = encodeForMaps(disambiguatedLocations[0]);
-        const dest = encodeForMaps(disambiguatedLocations[disambiguatedLocations.length - 1]);
+        const encodedLocations = disambiguatedLocations.map(loc => encodeForMaps(loc));
+        const baseUrl = `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
 
-        // Build waypoints if there are middle stops
-        let waypointsParam = '';
-        if (disambiguatedLocations.length > 2) {
-            const waypoints = disambiguatedLocations.slice(1, -1)
-                .map(loc => encodeForMaps(loc))
-                .join('|');
-            waypointsParam = `&waypoints=${waypoints}`;
-        }
-
-        // Use Directions API URL format with proper travelmode support
-        return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${waypointsParam}&travelmode=${travelMode}`;
+        // Note: We don't add travelmode parameter because:
+        // - Transit doesn't work with multi-stop waypoints
+        // - Google Maps will show all available modes (transit, walk, drive, bike)
+        // - User can easily switch between modes in the UI
+        return baseUrl;
     }
 
     /**
