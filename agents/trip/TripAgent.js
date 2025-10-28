@@ -2350,9 +2350,17 @@ EXAMPLES OF WHAT TO EXCLUDE:
         const encodedLocations = disambiguatedLocations.map(loc => encodeURIComponent(loc));
         const baseUrl = `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
 
-        // Add travel mode parameter
-        // Options: transit (public transport), walking, bicycling, driving
-        return `${baseUrl}?travelmode=${travelMode}`;
+        // Add travel mode parameter using dirflg
+        // Options: r=transit, w=walking, b=bicycling, d=driving
+        const dirflgMap = {
+            'transit': 'r',
+            'walking': 'w',
+            'bicycling': 'b',
+            'driving': 'd'
+        };
+        const dirflg = dirflgMap[travelMode] || 'r'; // Default to transit
+
+        return `${baseUrl}?dirflg=${dirflg}`;
     }
 
     /**
