@@ -2333,7 +2333,9 @@ EXAMPLES OF WHAT TO EXCLUDE:
         }
 
         // Multi-stop route with travel mode
-        // Format: /dir/location1/location2/location3/?travelmode=transit
+        // Use Directions API format which properly supports travelmode for multi-stop routes
+        // Format: ?api=1&origin=...&destination=...&waypoints=...&travelmode=transit
+
         // Add destination city to each location to prevent Google Maps from finding wrong locations
         const disambiguatedLocations = locations.map((loc, index) => {
             // Skip first location if it's already the destination
@@ -2347,20 +2349,21 @@ EXAMPLES OF WHAT TO EXCLUDE:
             return loc;
         });
 
-        const encodedLocations = disambiguatedLocations.map(loc => encodeURIComponent(loc));
-        const baseUrl = `https://www.google.com/maps/dir/${encodedLocations.join('/')}`;
+        // For multi-stop: first location is origin, last is destination, middle are waypoints
+        const origin = encodeURIComponent(disambiguatedLocations[0]);
+        const dest = encodeURIComponent(disambiguatedLocations[disambiguatedLocations.length - 1]);
 
-        // Add travel mode parameter using dirflg
-        // Options: r=transit, w=walking, b=bicycling, d=driving
-        const dirflgMap = {
-            'transit': 'r',
-            'walking': 'w',
-            'bicycling': 'b',
-            'driving': 'd'
-        };
-        const dirflg = dirflgMap[travelMode] || 'r'; // Default to transit
+        // Build waypoints if there are middle stops
+        let waypointsParam = '';
+        if (disambiguatedLocations.length > 2) {
+            const waypoints = disambiguatedLocations.slice(1, -1)
+                .map(loc => encodeURIComponent(loc))
+                .join('|');
+            waypointsParam = `&waypoints=${waypoints}`;
+        }
 
-        return `${baseUrl}?dirflg=${dirflg}`;
+        // Use Directions API URL format with proper travelmode support
+        return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${waypointsParam}&travelmode=${travelMode}`;
     }
 
     /**
